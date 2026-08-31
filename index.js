@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ChannelType, PermissionFlagsBits } = require('discord.js');
+const { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ChannelType, PermissionFlagsBits, AttachmentBuilder } = require('discord.js');
 
 const client = new Client({
   intents: [
@@ -202,7 +202,7 @@ client.on('interactionCreate', async (interaction) => {
     await channel.send({ content: `${member} ${SUPPORT_ROLE_ID ? `<@&${SUPPORT_ROLE_ID}>` : ''}`, embeds: [embed], components: [row] });
     await interaction.reply({ content: `Ticket kanalın oluşturuldu: ${channel}`, ephemeral: true });
 
-    // Log Kanalına Bildirim Gönderme
+    // Log Kanalına Açılış Bildirimi Gönderme
     if (LOG_CHANNEL_ID) {
       const logChannel = guild.channels.cache.get(LOG_CHANNEL_ID);
       if (logChannel) {
@@ -212,7 +212,7 @@ client.on('interactionCreate', async (interaction) => {
           .addFields(
             { name: 'Açan Üye', value: `${member.user.tag} (<@${member.id}>)`, inline: true },
             { name: 'Kategori', value: categoryInfo.name, inline: true },
-            { name: 'Kanal', value: `${channel}`, inline: false }
+            { name: 'Kanal', value: `${channel.name}`, inline: false }
           )
           .setTimestamp();
         await logChannel.send({ embeds: [logEmbed] }).catch(() => {});
@@ -222,7 +222,6 @@ client.on('interactionCreate', async (interaction) => {
 
   // Buton (Ticket Kapatma - Sadece Yetkililer Kapatabilir)
   if (interaction.isButton() && interaction.customId === 'close_ticket') {
-    // Üyenin yetkili rolü veya yönetici yetkisi var mı kontrol et
     const isSupport = SUPPORT_ROLE_ID && interaction.member.roles.cache.has(SUPPORT_ROLE_ID);
     const isAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
 
@@ -230,7 +229,41 @@ client.on('interactionCreate', async (interaction) => {
       return interaction.reply({ content: '❌ Bu ticketı sadece yetkililer kapatabilir!', ephemeral: true });
     }
 
-    await interaction.reply({ content: 'Ticket 3 saniye içinde kapatılacak...', ephemeral: true });
+    await interaction.reply({ content: 'Ticket kapatılıyor ve mesaj geçmişi loglanıyor...', ephemeral: true });
+
+    // Kanalın mesaj geçmişini çek
+    try {
+      const messages = await interaction.channel.messages.fetch({ limit: 100 });
+      const sortedMessages = Array.from(messages.values()).reverse();
+      
+      let transcript = `--- ${interaction.channel.name} TICKET GEÇMİŞİ ---\n\n`;
+      sortedMessages.forEach(m => {
+        transcript += `[${new Date(m.createdTimestamp).toLocaleString()}y] ${m.author.tag}: ${m.content}\n`;
+      });
+
+      // Metni dosya olarak hazırla
+      const buffer = Buffer.from(transcript, 'utf-8');
+      const attachment = new AttachmentBuilder(buffer, { name: `${interaction.channel.name}-gecmis.txt` });
+
+      // Log kanalına gönder
+      if (LOG_CHANNEL_ID) {
+        const logChannel = interaction.guild.channels.cache.get(LOG_CHANNEL_ID);
+        if (logChannel) {
+          const closeEmbed = new EmbedBuilder()
+            .setColor('#ff3333')
+            .setTitle('🔒 Ticket Kapatıldı')
+            .addFields(
+              { name: 'Kapatan Yetkili', value: `${interaction.user.tag} (<@${interaction.user.id}>)`, inline: true },
+              { name: 'Kanal Adı', value: interaction.channel.name, inline: true }
+            )
+            .setTimestamp();
+          await logChannel.send({ embeds: [closeEmbed], files: [attachment] }).catch(() => {});
+        }
+      }
+    } catch (err) {
+      console.error("Log dökümü alınamadı:", err);
+    }
+
     setTimeout(() => {
       interaction.channel.delete().catch(() => {});
     }, 3000);
