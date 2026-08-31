@@ -15,14 +15,17 @@ const client = new Client({
 // ======================
 // AYARLAR
 // ======================
-const SUPPORT_ROLE_ID = "1542872257276149860"; // Destek Rol ID
-const VOICE_CHANNEL_ID = "1542872463870922814"; // 7/24 Duracağı Yeni Ses Kanalı ID
+const SUPPORT_ROLE_ID = "1542872257276149860"; // Yetkili Rol ID
+const VOICE_CHANNEL_ID = "1542872463870922814"; // 7/24 Duracağı Ses Kanalı ID
 
-// Ticket Kategorileri
+// Yeni İstediğin Ticket Kategorileri
 const TICKET_CATEGORIES = {
   'ticket_anticheat': { name: 'ANTICHEAT | Güvenlik', categoryName: 'ANTICHEAT TICKETLARI' },
   'ticket_teknik': { name: 'TEKNIK | Destek', categoryName: 'TEKNİK DESTEK TICKETLARI' },
-  'ticket_oyunici': { name: 'OYUN-ICI | Destek', categoryName: 'OYUN İÇİ TICKETLARI' }
+  'ticket_oyunici': { name: 'OYUN-ICI | Destek', categoryName: 'OYUN İÇİ TICKETLARI' },
+  'ticket_satis': { name: 'SATIN-ALIM | Destek', categoryName: 'SATIN ALIM TICKETLARI' },
+  'ticket_donate': { name: 'DONATE-BILGI | Destek', categoryName: 'DONATE BİLGİ TICKETLARI' },
+  'ticket_streamer': { name: 'STREAMER | Destek', categoryName: 'STREAMER BİLGİ TICKETLARI' }
 };
 
 // ======================
@@ -31,7 +34,6 @@ const TICKET_CATEGORIES = {
 client.once('ready', async () => {
   console.log(`✅ ${client.user.tag} olarak giriş yapıldı!`);
 
-  // Slash Komutlarını Kaydetme
   const commands = [
     new SlashCommandBuilder()
       .setName('komutlar')
@@ -52,7 +54,7 @@ client.once('ready', async () => {
     console.error(error);
   }
 
-  // Yeni Ses kanalına bağlan
+  // Ses kanalına bağlan
   if (VOICE_CHANNEL_ID) {
     const channel = await client.channels.fetch(VOICE_CHANNEL_ID).catch(() => null);
     if (channel && channel.isVoiceBased()) {
@@ -64,7 +66,7 @@ client.once('ready', async () => {
         selfDeaf: true,
         selfMute: true
       });
-      console.log("🔊 Yeni ses kanalına giriş yapıldı!");
+      console.log("🔊 Ses kanalına giriş yapıldı!");
     }
   }
 });
@@ -76,10 +78,11 @@ client.on('messageCreate', async (message) => {
   if (message.content === '!ticketpanel' && message.member.permissions.has(PermissionFlagsBits.Administrator)) {
     
     const embed = new EmbedBuilder()
-      .setColor('#00b4d8')
+      .setColor('#7b2cbf') // Mavi-Mor Tema Tonu
       .setTitle('FEST GUN | Destek Sistemi')
       .setDescription('Destek talebi oluşturmak için aşağıdaki menüden **konu seçimi** yapın.')
-      .setImage('https://images.unsplash.com/photo-1563089145-599997674d42?q=80&w=1200&auto=format&fit=crop')
+      // Mavi/Mor arka planlı, FEST GUN yazılı havalı görsel
+      .setImage('https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1200&auto=format&fit=crop')
       .setFooter({ text: 'FEST GUN Ticket Sistemi' });
 
     const selectMenu = new StringSelectMenuBuilder()
@@ -88,19 +91,34 @@ client.on('messageCreate', async (message) => {
       .addOptions(
         new StringSelectMenuOptionBuilder()
           .setLabel('AntiCheat')
-          .setDescription('AntiCheat ve güvenlik konuları için açın.')
+          .setDescription('Güvenlik ve hile bildirimleri.')
           .setValue('ticket_anticheat')
           .setEmoji('🛡️'),
         new StringSelectMenuOptionBuilder()
           .setLabel('Teknik Destek')
-          .setDescription('Teknik sorunlar ve buglar için açın.')
+          .setDescription('Teknik sorunlar ve hatalar.')
           .setValue('ticket_teknik')
           .setEmoji('💻'),
         new StringSelectMenuOptionBuilder()
           .setLabel('Oyun İçi Destek')
-          .setDescription('Oyun içi yaşanan durumlar için açın.')
+          .setDescription('Oyun içi yaşanan durumlar.')
           .setValue('ticket_oyunici')
-          .setEmoji('🎮')
+          .setEmoji('🎮'),
+        new StringSelectMenuOptionBuilder()
+          .setLabel('Satın Alım')
+          .setDescription('Satın alım ve ödeme işlemleri.')
+          .setValue('ticket_satis')
+          .setEmoji('💳'),
+        new StringSelectMenuOptionBuilder()
+          .setLabel('Donate Bilgi')
+          .setDescription('Bağış ve destek bilgileri.')
+          .setValue('ticket_donate')
+          .setEmoji('💖'),
+        new StringSelectMenuOptionBuilder()
+          .setLabel('Streamer Bilgi')
+          .setDescription('Yayıncı ve içerik üretici bilgileri.')
+          .setValue('ticket_streamer')
+          .setEmoji('📺')
       );
 
     const row = new ActionRowBuilder().addComponents(selectMenu);
@@ -114,11 +132,10 @@ client.on('messageCreate', async (message) => {
 // ETKİLEŞİM VE SLASH KOMUT İŞLEMCİSİ
 // ======================
 client.on('interactionCreate', async (interaction) => {
-  // Slash Komutları
   if (interaction.isChatInputCommand()) {
     if (interaction.commandName === 'komutlar') {
       const embed = new EmbedBuilder()
-        .setColor('#00b4d8')
+        .setColor('#7b2cbf')
         .setTitle('⚡ FEST GUN | Bot Komutları')
         .setDescription('Sunucumuzda kullanılan aktif komutlar aşağıdadır:')
         .addFields(
@@ -187,7 +204,7 @@ client.on('interactionCreate', async (interaction) => {
     });
 
     const embed = new EmbedBuilder()
-      .setColor('#00b4d8')
+      .setColor('#7b2cbf')
       .setTitle(`${categoryInfo.name} - Ticket`)
       .setDescription(`Merhaba ${member},\n\nSeçtiğin Kategori: **${categoryInfo.name}**\nYetkililer en kısa sürede sizinle ilgilenecektir.\nTicketı kapatmak için aşağıdaki butonu kullanabilirsiniz.`)
       .setFooter({ text: 'FEST GUN' });
