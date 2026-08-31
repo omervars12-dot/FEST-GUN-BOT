@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ChannelType, PermissionFlagsBits, REST, Routes, SlashCommandBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ChannelType, PermissionFlagsBits } = require('discord.js');
 
 const client = new Client({
   intents: [
@@ -18,7 +18,7 @@ const client = new Client({
 const SUPPORT_ROLE_ID = "1542872257276149860"; // Yetkili Rol ID
 const VOICE_CHANNEL_ID = "1542872463870922814"; // 7/24 Duracağı Ses Kanalı ID
 
-// Yeni İstediğin Ticket Kategorileri
+// Ticket Kategorileri
 const TICKET_CATEGORIES = {
   'ticket_anticheat': { name: 'ANTICHEAT | Güvenlik', categoryName: 'ANTICHEAT TICKETLARI' },
   'ticket_teknik': { name: 'TEKNIK | Destek', categoryName: 'TEKNİK DESTEK TICKETLARI' },
@@ -29,30 +29,10 @@ const TICKET_CATEGORIES = {
 };
 
 // ======================
-// BOT HAZIR & SLASH KOMUTLARI
+// BOT HAZIR
 // ======================
 client.once('ready', async () => {
   console.log(`✅ ${client.user.tag} olarak giriş yapıldı!`);
-
-  const commands = [
-    new SlashCommandBuilder()
-      .setName('komutlar')
-      .setDescription('Botun tüm komutlarını ve özelliklerini gösterir.'),
-    new SlashCommandBuilder()
-      .setName('reklam')
-      .setDescription('Everyone atarak bot sipariş duyurusunu gönderir. (Yönetici Özel)')
-  ];
-
-  const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
-  try {
-    await rest.put(
-      Routes.applicationCommands(client.user.id),
-      { body: commands },
-    );
-    console.log('✨ Slash komutları başarıyla yüklendi!');
-  } catch (error) {
-    console.error(error);
-  }
 
   // Ses kanalına bağlan
   if (VOICE_CHANNEL_ID) {
@@ -72,17 +52,20 @@ client.once('ready', async () => {
 });
 
 // ======================
-// MESAJ VE SLASH KOMUTLARI YÖNETİMİ
+// MESAJ VE KOMUT YÖNETİMİ (! İle Başlayanlar)
 // ======================
 client.on('messageCreate', async (message) => {
+  if (message.author.bot) return;
+
+  // Ticket Panel Kurma Komutu
   if (message.content === '!ticketpanel' && message.member.permissions.has(PermissionFlagsBits.Administrator)) {
     
     const embed = new EmbedBuilder()
-      .setColor('#7b2cbf') // Mavi-Mor Tema Tonu
+      .setColor('#3a86ff')
       .setTitle('FEST GUN | Destek Sistemi')
       .setDescription('Destek talebi oluşturmak için aşağıdaki menüden **konu seçimi** yapın.')
-      // Mavi/Mor arka planlı, FEST GUN yazılı havalı görsel
-      .setImage('https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1200&auto=format&fit=crop')
+      // Gönderdiğin özel FEST GUN görseli doğrudan panele eklendi
+      .setImage('https://i.ibb.co/6R2q0N7/chatgpt-image.png')
       .setFooter({ text: 'FEST GUN Ticket Sistemi' });
 
     const selectMenu = new StringSelectMenuBuilder()
@@ -126,40 +109,39 @@ client.on('messageCreate', async (message) => {
     await message.channel.send({ embeds: [embed], components: [row] });
     await message.delete().catch(() => {});
   }
+
+  // !komutlar Komutu
+  if (message.content === '!komutlar') {
+    const embed = new EmbedBuilder()
+      .setColor('#3a86ff')
+      .setTitle('⚡ FEST GUN | Bot Komutları')
+      .setDescription('Sunucumuzda kullanılan aktif komutlar aşağıdadır:')
+      .addFields(
+        { name: '`!komutlar`', value: 'Botun komut listesini gösterir.', inline: false },
+        { name: '`!reklam`', value: '@everyone atarak bot sipariş duyurusunu gönderir. (Yönetici Özel)', inline: false },
+        { name: '`!ticketpanel`', value: 'Destek panelini kurar. (Yönetici Özel)', inline: false }
+      )
+      .setFooter({ text: 'FEST GUN' });
+
+    await message.reply({ embeds: [embed] });
+  }
+
+  // !reklam Komutu
+  if (message.content === '!reklam') {
+    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) {
+      return message.reply({ content: 'Bu komutu kullanmak için Yönetici yetkin olmalı!' });
+    }
+
+    await message.delete().catch(() => {});
+    const reklamMetni = `@everyone HERTÜRLÜ BOT YAPILIR ALMAK İÇİN https://discord.com/channels/1529478234352128030/1543014485881528372`;
+    await message.channel.send({ content: reklamMetni });
+  }
 });
 
 // ======================
-// ETKİLEŞİM VE SLASH KOMUT İŞLEMCİSİ
+// ETKİLEŞİM İŞLEMCİSİ (Menüler ve Butonlar)
 // ======================
 client.on('interactionCreate', async (interaction) => {
-  if (interaction.isChatInputCommand()) {
-    if (interaction.commandName === 'komutlar') {
-      const embed = new EmbedBuilder()
-        .setColor('#7b2cbf')
-        .setTitle('⚡ FEST GUN | Bot Komutları')
-        .setDescription('Sunucumuzda kullanılan aktif komutlar aşağıdadır:')
-        .addFields(
-          { name: '`/komutlar`', value: 'Botun komut listesini gösterir.', inline: false },
-          { name: '`/reklam`', value: '@everyone atarak bot sipariş duyurusunu gönderir. (Yönetici Özel)', inline: false },
-          { name: '`!ticketpanel`', value: 'Destek panelini kurar. (Yönetici Özel)', inline: false }
-        )
-        .setFooter({ text: 'FEST GUN' });
-
-      await interaction.reply({ embeds: [embed], ephemeral: true });
-    }
-
-    if (interaction.commandName === 'reklam') {
-      if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-        return interaction.reply({ content: 'Bu komutu kullanmak için Yönetici yetkin olmalı!', ephemeral: true });
-      }
-
-      await interaction.reply({ content: 'Reklam mesajı gönderiliyor...', ephemeral: true });
-      
-      const reklamMetni = `@everyone HERTÜRLÜ BOT YAPILIR ALMAK İÇİN https://discord.com/channels/1529478234352128030/1543014485881528372`;
-      await interaction.channel.send({ content: reklamMetni });
-    }
-  }
-
   // Seçim Menüsü (Ticket Oluşturma)
   if (interaction.isStringSelectMenu() && interaction.customId === 'ticket_select_menu') {
     const guild = interaction.guild;
@@ -204,7 +186,7 @@ client.on('interactionCreate', async (interaction) => {
     });
 
     const embed = new EmbedBuilder()
-      .setColor('#7b2cbf')
+      .setColor('#3a86ff')
       .setTitle(`${categoryInfo.name} - Ticket`)
       .setDescription(`Merhaba ${member},\n\nSeçtiğin Kategori: **${categoryInfo.name}**\nYetkililer en kısa sürede sizinle ilgilenecektir.\nTicketı kapatmak için aşağıdaki butonu kullanabilirsiniz.`)
       .setFooter({ text: 'FEST GUN' });
