@@ -64,8 +64,8 @@ client.on('messageCreate', async (message) => {
       .setColor('#3a86ff')
       .setTitle('FEST GUN | Destek Sistemi')
       .setDescription('Destek talebi oluşturmak için aşağıdaki menüden **konu seçimi** yapın.')
-      // Gönderdiğin özel FEST GUN görseli doğrudan panele eklendi
-      .setImage('https://i.ibb.co/6R2q0N7/chatgpt-image.png')
+      // Kendi gönderdiğin Discord görsel linkin eklendi
+      .setImage('https://media.discordapp.net/attachments/1542872935809814688/1543803508547915786/ChatGPT_Image_31_Agu_2026_05_01_30.png?ex=6a96328e&is=6a94e10e&hm=d768e25740d61c4e968870e844c5eb3dc0f26478a938dde0d14eb2d664b5e8b5&=&format=webp&quality=lossless&width=640&height=427')
       .setFooter({ text: 'FEST GUN Ticket Sistemi' });
 
     const selectMenu = new StringSelectMenuBuilder()
