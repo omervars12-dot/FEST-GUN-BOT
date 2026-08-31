@@ -17,6 +17,7 @@ const client = new Client({
 // ======================
 const SUPPORT_ROLE_ID = "1542872257276149860"; // Yetkili Rol ID
 const VOICE_CHANNEL_ID = "1542872463870922814"; // 7/24 Duracağı Ses Kanalı ID
+const LOG_CHANNEL_ID = "1543727426276692050";   // Ticket Log Kanalı ID
 
 // Ticket Kategorileri
 const TICKET_CATEGORIES = {
@@ -64,8 +65,7 @@ client.on('messageCreate', async (message) => {
       .setColor('#3a86ff')
       .setTitle('FEST GUN | Destek Sistemi')
       .setDescription('Destek talebi oluşturmak için aşağıdaki menüden **konu seçimi** yapın.')
-      // Kendi gönderdiğin Discord görsel linkin eklendi
-      .setImage('https://media.discordapp.net/attachments/1542872935809814688/1543803508547915786/ChatGPT_Image_31_Agu_2026_05_01_30.png?ex=6a96328e&is=6a94e10e&hm=d768e25740d61c4e968870e844c5eb3dc0f26478a938dde0d14eb2d664b5e8b5&=&format=webp&quality=lossless&width=640&height=427')
+      .setImage('https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1200&auto=format&fit=crop')
       .setFooter({ text: 'FEST GUN Ticket Sistemi' });
 
     const selectMenu = new StringSelectMenuBuilder()
@@ -201,10 +201,35 @@ client.on('interactionCreate', async (interaction) => {
 
     await channel.send({ content: `${member} ${SUPPORT_ROLE_ID ? `<@&${SUPPORT_ROLE_ID}>` : ''}`, embeds: [embed], components: [row] });
     await interaction.reply({ content: `Ticket kanalın oluşturuldu: ${channel}`, ephemeral: true });
+
+    // Log Kanalına Bildirim Gönderme
+    if (LOG_CHANNEL_ID) {
+      const logChannel = guild.channels.cache.get(LOG_CHANNEL_ID);
+      if (logChannel) {
+        const logEmbed = new EmbedBuilder()
+          .setColor('#ffaa00')
+          .setTitle('📂 Yeni Ticket Açıldı')
+          .addFields(
+            { name: 'Açan Üye', value: `${member.user.tag} (<@${member.id}>)`, inline: true },
+            { name: 'Kategori', value: categoryInfo.name, inline: true },
+            { name: 'Kanal', value: `${channel}`, inline: false }
+          )
+          .setTimestamp();
+        await logChannel.send({ embeds: [logEmbed] }).catch(() => {});
+      }
+    }
   }
 
-  // Buton (Ticket Kapatma)
+  // Buton (Ticket Kapatma - Sadece Yetkililer Kapatabilir)
   if (interaction.isButton() && interaction.customId === 'close_ticket') {
+    // Üyenin yetkili rolü veya yönetici yetkisi var mı kontrol et
+    const isSupport = SUPPORT_ROLE_ID && interaction.member.roles.cache.has(SUPPORT_ROLE_ID);
+    const isAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
+
+    if (!isSupport && !isAdmin) {
+      return interaction.reply({ content: '❌ Bu ticketı sadece yetkililer kapatabilir!', ephemeral: true });
+    }
+
     await interaction.reply({ content: 'Ticket 3 saniye içinde kapatılacak...', ephemeral: true });
     setTimeout(() => {
       interaction.channel.delete().catch(() => {});
