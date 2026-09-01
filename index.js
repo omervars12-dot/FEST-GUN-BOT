@@ -16,7 +16,7 @@ const client = new Client({
 // AYARLAR
 // ======================
 const SUPPORT_ROLE_ID = "1542872257276149860"; // Yetkili Rol ID
-const VOICE_CHANNEL_ID = "1542872463870922814"; // 7/24 Duracağı Ses Kanalı ID
+const VOICE_CHANNEL_ID = "1542872487715405976"; // 7/24 Duracağı Ses Kanalı ID
 const LOG_CHANNEL_ID = "1543727426276692050";   // Ticket Log Kanalı ID
 
 // Ticket Kategorileri
