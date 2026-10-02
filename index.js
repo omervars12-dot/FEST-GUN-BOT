@@ -65,7 +65,8 @@ client.on('messageCreate', async (message) => {
       .setColor('#3a86ff')
       .setTitle('FEST GUN | Destek Sistemi')
       .setDescription('Destek talebi oluşturmak için aşağıdaki menüden **konu seçimi** yapın.')
-      .setImage('https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1200&auto=format&fit=crop')
+      // İŞTE BURASI DEĞİŞTİ! Senin verdiğin fotoğraf linkini buraya ekledim 👇
+      .setImage('https://media.discordapp.net/attachments/1542872935809814688/1543803508547915786/ChatGPT_Image_31_Agu_2026_05_01_30.png?ex=6ac10b4e&is=6abfb9ce&hm=02fe519e74feb16ca8d9c8be9e763c647c3e9540e6e25d54e1ff315d8b4de867&=&format=webp&quality=lossless&width=1024&height=683')
       .setFooter({ text: 'FEST GUN Ticket Sistemi' });
 
     const selectMenu = new StringSelectMenuBuilder()
@@ -199,7 +200,7 @@ client.on('interactionCreate', async (interaction) => {
         .setEmoji('🔒')
     );
 
-    await channel.send({ content: `${member} ${SUPPORT_ROLE_ID ? `<@&${SUPPORT_ROLE_ID}>` : ''}`, embeds: [embed], components: [row] });
+    await channel.send({ content: `${member}${SUPPORT_ROLE_ID ? `<@&${SUPPORT_ROLE_ID}>` : ''}`, embeds: [embed], components: [row] });
     await interaction.reply({ content: `Ticket kanalın oluşturuldu: ${channel}`, ephemeral: true });
 
     // Log Kanalına Açılış Bildirimi Gönderme
@@ -238,7 +239,7 @@ client.on('interactionCreate', async (interaction) => {
       
       let transcript = `--- ${interaction.channel.name} TICKET GEÇMİŞİ ---\n\n`;
       sortedMessages.forEach(m => {
-        transcript += `[${new Date(m.createdTimestamp).toLocaleString()}y] ${m.author.tag}: ${m.content}\n`;
+        transcript += `[${new Date(m.createdTimestamp).toLocaleString()}y] ${m.author.tag}:${m.content}\n`;
       });
 
       // Metni dosya olarak hazırla
