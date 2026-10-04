@@ -1,6 +1,11 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ChannelType, PermissionFlagsBits, AttachmentBuilder } = require('discord.js');
 
+// Karşılama kartı için (npm i @napi-rs/canvas). Yüklü değilse kart olmadan devam eder.
+let createCanvas, loadImage;
+try { ({ createCanvas, loadImage } = require('@napi-rs/canvas')); }
+catch { console.warn('⚠️ @napi-rs/canvas yüklü değil, karşılama kartı görseli oluşturulmayacak.'); }
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -18,6 +23,7 @@ const client = new Client({
 const SUPPORT_ROLE_ID = "1542872257276149860"; // Yetkili Rol ID
 const VOICE_CHANNEL_ID = "1542872487715405976"; // 7/24 Duracağı Ses Kanalı ID
 const LOG_CHANNEL_ID = "1543727426276692050";   // Ticket Log Kanalı ID
+const GUVENLI_HESAP_GUN = 7; // Hesap bu günden eskiyse "Güvenli" yazar
 
 // Ticket Kategorileri
 const TICKET_CATEGORIES = {
@@ -49,6 +55,105 @@ client.once('ready', async () => {
       });
       console.log("🔊 Ses kanalına giriş yapıldı!");
     }
+  }
+});
+
+// ======================
+// SUNUCUYA GİRENE DM KARŞILAMA (Wildgun tarzı, Fest Gun versiyonu)
+// ======================
+const trKisa = (t) => new Date(t).toLocaleDateString('tr-TR', { timeZone: 'Europe/Istanbul', day: '2-digit', month: '2-digit', year: 'numeric' });
+const trUzun = (t) => new Date(t).toLocaleDateString('tr-TR', { timeZone: 'Europe/Istanbul', day: 'numeric', month: 'long', year: 'numeric' });
+
+async function karsilamaKarti(member) {
+  if (!createCanvas) return null;
+  try {
+    const W = 1024, H = 360;
+    const c = createCanvas(W, H);
+    const g = c.getContext('2d');
+
+    // Arka plan (Fest Gun mavisi)
+    const bg = g.createLinearGradient(0, 0, W, H);
+    bg.addColorStop(0, '#0a1738');
+    bg.addColorStop(0.55, '#1d4ed8');
+    bg.addColorStop(1, '#3a86ff');
+    g.fillStyle = bg;
+    g.fillRect(0, 0, W, H);
+    g.fillStyle = 'rgba(0,0,0,0.25)';
+    g.fillRect(0, 0, W, H);
+
+    // Avatar
+    const cx = 190, cy = 165, r = 105;
+    try {
+      const av = await loadImage(member.user.displayAvatarURL({ extension: 'png', size: 256 }));
+      g.save();
+      g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.closePath(); g.clip();
+      g.drawImage(av, cx - r, cy - r, r * 2, r * 2);
+      g.restore();
+    } catch {}
+    g.lineWidth = 8; g.strokeStyle = '#ffffff';
+    g.beginPath(); g.arc(cx, cy, r + 4, 0, Math.PI * 2); g.stroke();
+
+    // İsim (sığmazsa kısalt)
+    let isim = member.displayName || member.user.username;
+    g.fillStyle = '#ffffff';
+    g.font = 'bold 66px sans-serif';
+    while (g.measureText(isim).width > 640 && isim.length > 3) isim = isim.slice(0, -1);
+    g.fillText(isim, 340, 150);
+
+    g.fillStyle = 'rgba(255,255,255,0.7)';
+    g.font = '40px sans-serif';
+    g.fillText(`@${member.user.username}`, 340, 205);
+
+    // Alt şerit
+    g.fillStyle = 'rgba(0,0,0,0.55)';
+    g.fillRect(340, 262, 640, 56);
+    g.fillStyle = '#ffffff';
+    g.font = 'bold 28px sans-serif';
+    g.fillText('Fest Gun\'a Hoşgeldin!', 358, 301);
+    g.font = '26px sans-serif';
+    const tarih = trUzun(Date.now());
+    g.fillText(tarih, 980 - g.measureText(tarih).width - 18, 301);
+
+    return c.toBuffer('image/png');
+  } catch (e) {
+    console.error('Karşılama kartı oluşturulamadı:', e.message);
+    return null;
+  }
+}
+
+client.on('guildMemberAdd', async (member) => {
+  if (member.user.bot) return;
+  try {
+    const guild = member.guild;
+    const hesapYasi = Date.now() - member.user.createdTimestamp;
+    const guvenli = hesapYasi >= GUVENLI_HESAP_GUN * 86400000;
+
+    const embed = new EmbedBuilder()
+      .setColor('#3a86ff')
+      .setTitle(`${trKisa(Date.now())} #FESTGUN - Giriş`)
+      .setDescription(`<@${member.id}>\n\`ID: ${member.id}\``)
+      .setFooter({ text: 'FEST GUN' })
+      .setTimestamp();
+    if (guild.iconURL()) embed.setThumbnail(guild.iconURL());
+
+    const files = [];
+    const kart = await karsilamaKarti(member);
+    if (kart) {
+      files.push(new AttachmentBuilder(kart, { name: 'karsilama.png' }));
+      embed.setImage('attachment://karsilama.png');
+    }
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('hg_kullanici').setLabel(`@${member.user.username}`.slice(0, 80)).setStyle(ButtonStyle.Secondary).setDisabled(true),
+      new ButtonBuilder().setCustomId('hg_tarih').setLabel(trUzun(member.user.createdTimestamp)).setStyle(ButtonStyle.Secondary).setDisabled(true),
+      new ButtonBuilder().setCustomId('hg_guven').setLabel(guvenli ? 'Güvenli' : 'Şüpheli').setEmoji(guvenli ? '✅' : '⚠️').setStyle(ButtonStyle.Secondary).setDisabled(true),
+      new ButtonBuilder().setCustomId('hg_sira').setLabel(`Seninle ${guild.memberCount}!`).setStyle(ButtonStyle.Secondary).setDisabled(true)
+    );
+
+    await member.send({ embeds: [embed], components: [row], files });
+  } catch (e) {
+    // DM'leri kapalıysa mesaj gönderilemez, sessizce geç
+    console.log(`Karşılama DM'i gönderilemedi (${member.user.tag}): ${e.message}`);
   }
 });
 
