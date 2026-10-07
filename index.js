@@ -27,6 +27,13 @@ const VOICE_CHANNEL_ID = "1542872487715405976"; // 7/24 Duracağı Ses Kanalı I
 const LOG_CHANNEL_ID = "1557480455228498055";   // Ticket Log Kanalı ID
 const GUVENLI_HESAP_GUN = 7; // Hesap bu günden eskiyse "Güvenli" yazar
 
+// Ticket rolleri
+const ANTICHEAT_ROLE_ID = "1557449903872155770"; // AntiCheat ticketlarında etiketlenir
+const GENEL_ROLE_ID = "1557449922347929771";     // Diğer tüm ticketlarda etiketlenir
+
+// Bu roller TÜM ticket kanallarını görür, yazabilir ve ticketı kapatabilir
+const YETKILI_ROLLER = [...new Set([SUPPORT_ROLE_ID, ANTICHEAT_ROLE_ID, GENEL_ROLE_ID].filter(Boolean))];
+
 // Ticket paneli arka plan görseli
 const TICKET_GORSEL = "https://media.discordapp.net/attachments/1529424223037161533/1556448842910670949/image.png?backend=b2&ex=6ac77f31&is=6ac62db1&hm=3b3deb0cd51c0ce018b51c484f00418dafd4802e1aff446fc5049c7b9ae7bc31&=&format=webp&quality=lossless&width=1536&height=864";
 
@@ -51,14 +58,14 @@ async function ticketGorselDosyasi() {
   return null;
 }
 
-// Ticket Kategorileri
+// Ticket Kategorileri (roleId = o kategoride etiketlenecek rol)
 const TICKET_CATEGORIES = {
-  'ticket_anticheat': { name: 'ANTICHEAT | Güvenlik', categoryName: 'ANTICHEAT TICKETLARI' },
-  'ticket_teknik': { name: 'TEKNIK | Destek', categoryName: 'TEKNİK DESTEK TICKETLARI' },
-  'ticket_oyunici': { name: 'OYUN-ICI | Destek', categoryName: 'OYUN İÇİ TICKETLARI' },
-  'ticket_satis': { name: 'SATIN-ALIM | Destek', categoryName: 'SATIN ALIM TICKETLARI' },
-  'ticket_donate': { name: 'DONATE-BILGI | Destek', categoryName: 'DONATE BİLGİ TICKETLARI' },
-  'ticket_streamer': { name: 'STREAMER | Destek', categoryName: 'STREAMER BİLGİ TICKETLARI' }
+  'ticket_anticheat': { name: 'ANTICHEAT | Güvenlik', categoryName: 'ANTICHEAT TICKETLARI', roleId: ANTICHEAT_ROLE_ID },
+  'ticket_teknik': { name: 'TEKNIK | Destek', categoryName: 'TEKNİK DESTEK TICKETLARI', roleId: GENEL_ROLE_ID },
+  'ticket_oyunici': { name: 'OYUN-ICI | Destek', categoryName: 'OYUN İÇİ TICKETLARI', roleId: GENEL_ROLE_ID },
+  'ticket_satis': { name: 'SATIN-ALIM | Destek', categoryName: 'SATIN ALIM TICKETLARI', roleId: GENEL_ROLE_ID },
+  'ticket_donate': { name: 'DONATE-BILGI | Destek', categoryName: 'DONATE BİLGİ TICKETLARI', roleId: GENEL_ROLE_ID },
+  'ticket_streamer': { name: 'STREAMER | Destek', categoryName: 'STREAMER BİLGİ TICKETLARI', roleId: GENEL_ROLE_ID }
 };
 
 // ======================
@@ -85,7 +92,7 @@ client.once('ready', async () => {
 });
 
 // ======================
-// SUNUCUYA GİRENE DM KARŞILAMA (Wildgun tarzı, Fest Gun versiyonu)
+// SUNUCUYA GİRENE DM KARŞILAMA
 // ======================
 const trKisa = (t) => new Date(t).toLocaleDateString('tr-TR', { timeZone: 'Europe/Istanbul', day: '2-digit', month: '2-digit', year: 'numeric' });
 const trUzun = (t) => new Date(t).toLocaleDateString('tr-TR', { timeZone: 'Europe/Istanbul', day: 'numeric', month: 'long', year: 'numeric' });
@@ -188,10 +195,11 @@ client.on('guildMemberAdd', async (member) => {
 // ======================
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
+  if (!message.guild) return;
 
   // Ticket Panel Kurma Komutu
   if (message.content === '!ticketpanel' && message.member.permissions.has(PermissionFlagsBits.Administrator)) {
-    
+
     const embed = new EmbedBuilder()
       .setColor('#3a86ff')
       .setTitle('FEST GUN | Destek Sistemi')
@@ -276,139 +284,153 @@ client.on('messageCreate', async (message) => {
 // ======================
 client.on('interactionCreate', async (interaction) => {
   try {
-  // Seçim Menüsü (Ticket Oluşturma)
-  if (interaction.isStringSelectMenu() && interaction.customId === 'ticket_select_menu') {
-    const guild = interaction.guild;
-    const member = interaction.member;
-    const selectedValue = interaction.values[0];
-    const categoryInfo = TICKET_CATEGORIES[selectedValue];
+    // ---------- Seçim Menüsü (Ticket Oluşturma) ----------
+    if (interaction.isStringSelectMenu() && interaction.customId === 'ticket_select_menu') {
+      const guild = interaction.guild;
+      const member = interaction.member;
+      const selectedValue = interaction.values[0];
+      const categoryInfo = TICKET_CATEGORIES[selectedValue];
 
-    if (!categoryInfo) return;
+      if (!categoryInfo) return;
 
-    // Discord 3 saniyede yanıt bekler, kanal açmadan önce hemen yanıt ver
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      // Discord 3 saniyede yanıt bekler, kanal açmadan önce hemen yanıt ver
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-    const channelName = `${categoryInfo.name.split(' ')[0].toLowerCase()}-${member.user.username.toLowerCase()}`;
-    const existing = guild.channels.cache.find(c => c.name === channelName);
-    if (existing) {
-      return interaction.editReply({ content: `Zaten bu kategoride açık bir ticketin var: ${existing}` });
-    }
-
-    let discordCategory = guild.channels.cache.find(c => c.name === categoryInfo.categoryName && c.type === ChannelType.GuildCategory);
-    if (!discordCategory) {
-      discordCategory = await guild.channels.create({
-        name: categoryInfo.categoryName,
-        type: ChannelType.GuildCategory
-      });
-    }
-
-    let permissionOverwrites = [
-      { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-      { id: member.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
-      { id: client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels] }
-    ];
-
-    // Yetkili rolü bu sunucuda gerçekten var mı kontrol et (yoksa "not a cached User or Role" hatası verir)
-    const destekRol = SUPPORT_ROLE_ID ? await guild.roles.fetch(SUPPORT_ROLE_ID).catch(() => null) : null;
-    if (destekRol) {
-      permissionOverwrites.push({
-        id: destekRol.id,
-        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory]
-      });
-    } else if (SUPPORT_ROLE_ID) {
-      console.error(`❌ SUPPORT_ROLE_ID (${SUPPORT_ROLE_ID}) bu sunucuda bulunamadı! Rol ID'sini kontrol et, yetkililer ticketı göremez.`);
-    }
-
-    const channel = await guild.channels.create({
-      name: channelName,
-      type: ChannelType.GuildText,
-      parent: discordCategory.id,
-      permissionOverwrites: permissionOverwrites
-    });
-
-    const embed = new EmbedBuilder()
-      .setColor('#3a86ff')
-      .setTitle(`${categoryInfo.name} - Ticket`)
-      .setDescription(`Merhaba ${member},\n\nSeçtiğin Kategori: **${categoryInfo.name}**\nYetkililer en kısa sürede sizinle ilgilenecektir.\nTicketı kapatmak için aşağıdaki butonu kullanabilirsiniz.`)
-      .setFooter({ text: 'FEST GUN' });
-
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId('close_ticket')
-        .setLabel('Ticketı Kapat')
-        .setStyle(ButtonStyle.Secondary)
-        .setEmoji('🔒')
-    );
-
-    await channel.send({ content: `${member} ${destekRol ? `<@&${destekRol.id}>` : ''}`, embeds: [embed], components: [row] });
-    await interaction.editReply({ content: `Ticket kanalın oluşturuldu: ${channel}` });
-
-    // Log Kanalına Açılış Bildirimi Gönderme
-    if (LOG_CHANNEL_ID) {
-      const logChannel = guild.channels.cache.get(LOG_CHANNEL_ID);
-      if (logChannel) {
-        const logEmbed = new EmbedBuilder()
-          .setColor('#ffaa00')
-          .setTitle('📂 Yeni Ticket Açıldı')
-          .addFields(
-            { name: 'Açan Üye', value: `${member.user.tag} (<@${member.id}>)`, inline: true },
-            { name: 'Kategori', value: categoryInfo.name, inline: true },
-            { name: 'Kanal', value: `${channel.name}`, inline: false }
-          )
-          .setTimestamp();
-        await logChannel.send({ embeds: [logEmbed] }).catch(() => {});
+      // Kişi başı TEK aktif ticket (kategori fark etmez). Sahibi kanal konusunda (topic) tutulur.
+      const ownerTag = `ticket-owner:${member.id}`;
+      const existing = guild.channels.cache.find(c => c.type === ChannelType.GuildText && c.topic === ownerTag);
+      if (existing) {
+        return interaction.editReply({ content: `❌ Zaten açık bir ticketin var: ${existing}\nYeni ticket açmak için önce mevcut ticketın kapatılmasını bekle.` });
       }
-    }
-  }
 
-  // Buton (Ticket Kapatma - Sadece Yetkililer Kapatabilir)
-  if (interaction.isButton() && interaction.customId === 'close_ticket') {
-    const isSupport = SUPPORT_ROLE_ID && interaction.member.roles.cache.has(SUPPORT_ROLE_ID);
-    const isAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
+      const channelName = `${categoryInfo.name.split(' ')[0].toLowerCase()}-${member.user.username.toLowerCase()}`;
 
-    if (!isSupport && !isAdmin) {
-      return interaction.reply({ content: '❌ Bu ticketı sadece yetkililer kapatabilir!', ephemeral: true });
-    }
+      let discordCategory = guild.channels.cache.find(c => c.name === categoryInfo.categoryName && c.type === ChannelType.GuildCategory);
+      if (!discordCategory) {
+        discordCategory = await guild.channels.create({
+          name: categoryInfo.categoryName,
+          type: ChannelType.GuildCategory
+        });
+      }
 
-    await interaction.reply({ content: 'Ticket kapatılıyor ve mesaj geçmişi loglanıyor...', ephemeral: true });
+      const permissionOverwrites = [
+        { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+        { id: member.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
+        { id: client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels] }
+      ];
 
-    // Kanalın mesaj geçmişini çek
-    try {
-      const messages = await interaction.channel.messages.fetch({ limit: 100 });
-      const sortedMessages = Array.from(messages.values()).reverse();
-      
-      let transcript = `--- ${interaction.channel.name} TICKET GEÇMİŞİ ---\n\n`;
-      sortedMessages.forEach(m => {
-        transcript += `[${new Date(m.createdTimestamp).toLocaleString()}y] ${m.author.tag}: ${m.content}\n`;
-      });
-
-      // Metni dosya olarak hazırla
-      const buffer = Buffer.from(transcript, 'utf-8');
-      const attachment = new AttachmentBuilder(buffer, { name: `${interaction.channel.name}-gecmis.txt` });
-
-      // Log kanalına gönder
-      if (LOG_CHANNEL_ID) {
-        const logChannel = interaction.guild.channels.cache.get(LOG_CHANNEL_ID);
-        if (logChannel) {
-          const closeEmbed = new EmbedBuilder()
-            .setColor('#ff3333')
-            .setTitle('🔒 Ticket Kapatıldı')
-            .addFields(
-              { name: 'Kapatan Yetkili', value: `${interaction.user.tag} (<@${interaction.user.id}>)`, inline: true },
-              { name: 'Kanal Adı', value: interaction.channel.name, inline: true }
-            )
-            .setTimestamp();
-          await logChannel.send({ embeds: [closeEmbed], files: [attachment] }).catch(() => {});
+      // Yetkili roller (her biri tüm ticketları görür). Sunucuda yoksa atla ("not a cached User or Role" hatasını önler)
+      for (const rid of YETKILI_ROLLER) {
+        const rol = await guild.roles.fetch(rid).catch(() => null);
+        if (rol) {
+          permissionOverwrites.push({
+            id: rol.id,
+            allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory]
+          });
+        } else {
+          console.error(`❌ Rol (${rid}) bu sunucuda bulunamadı! ID'yi kontrol et.`);
         }
       }
-    } catch (err) {
-      console.error("Log dökümü alınamadı:", err);
+
+      const channel = await guild.channels.create({
+        name: channelName,
+        type: ChannelType.GuildText,
+        parent: discordCategory.id,
+        topic: ownerTag,
+        permissionOverwrites: permissionOverwrites
+      });
+
+      const embed = new EmbedBuilder()
+        .setColor('#3a86ff')
+        .setTitle(`${categoryInfo.name} - Ticket`)
+        .setDescription(`Merhaba ${member},\n\nSeçtiğin Kategori: **${categoryInfo.name}**\nYetkililer en kısa sürede sizinle ilgilenecektir.\nTicketı kapatmak için aşağıdaki butonu kullanabilirsiniz.`)
+        .setFooter({ text: 'FEST GUN' });
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId('close_ticket')
+          .setLabel('Ticketı Kapat')
+          .setStyle(ButtonStyle.Secondary)
+          .setEmoji('🔒')
+      );
+
+      await channel.send({
+        content: `${member} <@&${categoryInfo.roleId}>`,
+        embeds: [embed],
+        components: [row],
+        allowedMentions: { users: [member.id], roles: [categoryInfo.roleId] }
+      });
+      await interaction.editReply({ content: `Ticket kanalın oluşturuldu: ${channel}` });
+
+      // Log Kanalına Açılış Bildirimi
+      if (LOG_CHANNEL_ID) {
+        const logChannel = guild.channels.cache.get(LOG_CHANNEL_ID);
+        if (logChannel) {
+          const logEmbed = new EmbedBuilder()
+            .setColor('#ffaa00')
+            .setTitle('📂 Yeni Ticket Açıldı')
+            .addFields(
+              { name: 'Açan Üye', value: `${member.user.tag} (<@${member.id}>)`, inline: true },
+              { name: 'Kategori', value: categoryInfo.name, inline: true },
+              { name: 'Kanal', value: `${channel.name}`, inline: false }
+            )
+            .setTimestamp();
+          await logChannel.send({ embeds: [logEmbed] }).catch(() => {});
+        }
+      }
     }
 
-    setTimeout(() => {
-      interaction.channel.delete().catch(() => {});
-    }, 3000);
-  }
+    // ---------- Buton (Ticket Kapatma - Sadece Yetkililer) ----------
+    if (interaction.isButton() && interaction.customId === 'close_ticket') {
+      const yetkiliMi = YETKILI_ROLLER.some(id => interaction.member.roles.cache.has(id));
+      const isAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
+
+      if (!yetkiliMi && !isAdmin) {
+        return interaction.reply({ content: '❌ Bu ticketı sadece yetkililer kapatabilir!', flags: MessageFlags.Ephemeral });
+      }
+
+      // Kimin kapattığı kanalda herkese görünür
+      await interaction.reply({
+        content: `🔒 Bu ticket ${interaction.user} (**${interaction.user.tag}**) tarafından kapatıldı. Kanal 3 saniye içinde silinecek...`,
+        allowedMentions: { parse: [] }
+      });
+
+      // Kanalın mesaj geçmişini çek
+      try {
+        const messages = await interaction.channel.messages.fetch({ limit: 100 });
+        const sortedMessages = Array.from(messages.values()).reverse();
+
+        let transcript = `--- ${interaction.channel.name} TICKET GEÇMİŞİ ---\n\n`;
+        sortedMessages.forEach(m => {
+          transcript += `[${new Date(m.createdTimestamp).toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul' })}] ${m.author.tag}: ${m.content}\n`;
+        });
+
+        const buffer = Buffer.from(transcript, 'utf-8');
+        const attachment = new AttachmentBuilder(buffer, { name: `${interaction.channel.name}-gecmis.txt` });
+
+        // Log kanalına gönder
+        if (LOG_CHANNEL_ID) {
+          const logChannel = interaction.guild.channels.cache.get(LOG_CHANNEL_ID);
+          if (logChannel) {
+            const closeEmbed = new EmbedBuilder()
+              .setColor('#ff3333')
+              .setTitle('🔒 Ticket Kapatıldı')
+              .addFields(
+                { name: 'Kapatan Yetkili', value: `${interaction.user.tag} (<@${interaction.user.id}>)`, inline: true },
+                { name: 'Kanal Adı', value: interaction.channel.name, inline: true }
+              )
+              .setTimestamp();
+            await logChannel.send({ embeds: [closeEmbed], files: [attachment] }).catch(() => {});
+          }
+        }
+      } catch (err) {
+        console.error("Log dökümü alınamadı:", err);
+      }
+
+      setTimeout(() => {
+        interaction.channel.delete().catch(() => {});
+      }, 3000);
+    }
   } catch (e) {
     console.error('Etkileşim hatası:', e);
     const mesaj = `❌ Bir hata oluştu: ${e.message || 'Bilinmeyen hata'}\n(Botun Kanalları Yönet yetkisi var mı kontrol et.)`;
