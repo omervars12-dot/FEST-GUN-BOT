@@ -455,9 +455,12 @@ const RENK = '#3a86ff';
 const EKIP_YETKILI_ROLLER = [TEAM_ROLE_ID].filter(Boolean);
 
 const TYPES = {
-  ekip:    { label: 'Ekip Başvurusu',        prefix: 'ekip',    categoryName: 'EKİP BAŞVURULARI' },
-  yetkili: { label: 'Ekip Yetkili Başvurusu', prefix: 'yetkili', categoryName: 'EKİP YETKİLİ BAŞVURULARI' }
+  legal:   { label: 'Legal Ekip',   prefix: 'legal',   categoryName: 'LEGAL EKİP BAŞVURULARI' },
+  illegal: { label: 'Illegal Ekip', prefix: 'illegal', categoryName: 'ILLEGAL EKİP BAŞVURULARI' }
 };
+// Eski kayıtlar bozulmasın diye eski anahtarlar yeni türlere bağlı
+TYPES.ekip = TYPES.legal;
+TYPES.yetkili = TYPES.illegal;
 
 const STATUS = {
   bekliyor:    { emoji: 'ℹ️', text: 'Yetkili bekleniyor.', color: '#3a86ff' },
@@ -540,13 +543,32 @@ function ilkYanitKaydet(t) {
   saveData();
 }
 
+// Ekip paneli / ticket kartı için büyük arka plan görseli.
+// Önce klasördeki ekip.png / ekip.jpg / ekip.webp aranır, yoksa ticket görseli (ticket.png veya TICKET_GORSEL linki) kullanılır.
+let gorselOnbellek = null;
+async function ekipGorselDosyasi() {
+  if (!gorselOnbellek) {
+    for (const ad of ['ekip.png', 'ekip.jpg', 'ekip.jpeg', 'ekip.webp']) {
+      const yol = path.join(__dirname, ad);
+      try { if (fs.existsSync(yol)) { gorselOnbellek = { name: ad, buf: fs.readFileSync(yol) }; break; } } catch {}
+    }
+  }
+  if (!gorselOnbellek) {
+    try {
+      const g = await ticketGorselDosyasi();
+      if (g) gorselOnbellek = { name: g.name, buf: g.attachment };
+    } catch {}
+  }
+  return gorselOnbellek ? new AttachmentBuilder(gorselOnbellek.buf, { name: gorselOnbellek.name }) : null;
+}
+
 const ephemeral = (content) => ({ content, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
 
 // ======================
 // MESAJ / EMBED OLUŞTURUCULAR
 // ======================
 function ticketPayload(t, owner) {
-  const type = TYPES[t.type] || TYPES.ekip;
+  const type = TYPES[t.type] || TYPES.legal;
   const st = STATUS[t.status] || STATUS.bekliyor;
   const ts = Math.floor(t.createdAt / 1000);
 
@@ -562,6 +584,7 @@ function ticketPayload(t, owner) {
     )
     .setFooter({ text: 'FEST GUN' });
   if (owner) embed.setThumbnail(owner.displayAvatarURL({ extension: 'png', size: 256 }));
+  if (t.gorsel) embed.setImage(`attachment://${t.gorsel}`);
 
   const aktif = (key) => (t.status === key ? ButtonStyle.Primary : ButtonStyle.Secondary);
 
@@ -583,7 +606,7 @@ function ticketPayload(t, owner) {
   return { embeds: [embed], components: [row1, row2] };
 }
 
-function panelPayload(guild) {
+function panelPayload(guild, gorsel) {
   const embed = new EmbedBuilder()
     .setColor(RENK)
     .setTitle('🛡️ Festgun Ekip Başvurusu')
@@ -621,13 +644,14 @@ function panelPayload(guild) {
     .setFooter({ text: 'FEST GUN' });
 
   if (guild && guild.iconURL()) embed.setThumbnail(guild.iconURL());
-  if (PANEL_GORSEL) embed.setImage(PANEL_GORSEL);
+  if (gorsel) embed.setImage(`attachment://${gorsel.name}`);
+  else if (PANEL_GORSEL) embed.setImage(PANEL_GORSEL);
 
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('eb_open_ekip').setLabel('Ekip Başvurusu').setEmoji('🛡️').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId('eb_open_yetkili').setLabel('Ekip Yetkili Başvurusu').setEmoji('🛡️').setStyle(ButtonStyle.Danger)
+    new ButtonBuilder().setCustomId('eb_open_legal').setLabel('Legal Ekip Başvurusu').setEmoji('🛡️').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('eb_open_illegal').setLabel('Illegal Ekip Başvurusu').setEmoji('🛡️').setStyle(ButtonStyle.Danger)
   );
-  return { embeds: [embed], components: [row] };
+  return { embeds: [embed], components: [row], files: gorsel ? [gorsel] : [] };
 }
 
 // ======================
@@ -648,7 +672,7 @@ async function tumMesajlar(channel, max = 1000) {
 
 async function transcriptOlustur(channel, t) {
   const msgs = await tumMesajlar(channel);
-  const type = TYPES[t.type] || TYPES.ekip;
+  const type = TYPES[t.type] || TYPES.legal;
   let txt = `--- ${channel.name} | Destek Talebi #${t.number} GEÇMİŞİ ---\n`;
   txt += `Kategori: ${type.label}\nAçan (ID): ${t.ownerId}\nAçılış: ${trTarih(t.createdAt)}\n`;
   txt += `Üstlenen (ID): ${t.claimedBy || '-'}\nMesaj sayısı: ${msgs.length}\n\n`;
@@ -731,7 +755,8 @@ function ekipBasvuruKur(client) {
         if (!message.member || !message.member.permissions.has(PermissionFlagsBits.Administrator)) {
           return message.reply({ content: 'Bu komutu kullanmak için Yönetici yetkin olmalı!' }).catch(() => {});
         }
-        await message.channel.send(panelPayload(message.guild));
+        const gorsel = await ekipGorselDosyasi();
+        await message.channel.send(panelPayload(message.guild, gorsel));
         await message.delete().catch(() => {});
         return;
       }
@@ -823,6 +848,8 @@ function ekipBasvuruKur(client) {
         }
       }
 
+      const gorsel = await ekipGorselDosyasi();
+
       const t = {
         number,
         guildId: guild.id,
@@ -833,7 +860,8 @@ function ekipBasvuruKur(client) {
         claimedBy: null,
         createdAt: Date.now(),
         firstResponseAt: null,
-        notify: []
+        notify: [],
+        gorsel: gorsel ? gorsel.name : null
       };
       data.tickets[channel.id] = t;
       saveData();
@@ -842,6 +870,7 @@ function ekipBasvuruKur(client) {
         await channel.send({
           content: `${member} <@&${TEAM_ROLE_ID}>`,
           ...ticketPayload(t, member.user),
+          files: gorsel ? [gorsel] : [],
           allowedMentions: { users: [member.id], roles: [TEAM_ROLE_ID] }
         });
       } catch (e) {
@@ -907,7 +936,7 @@ function ekipBasvuruKur(client) {
       try { dosya = await transcriptOlustur(channel, t); }
       catch (e) { console.error('Transcript alınamadı:', e); }
 
-      const type = TYPES[t.type] || TYPES.ekip;
+      const type = TYPES[t.type] || TYPES.legal;
       const st = STATUS[t.status] || STATUS.bekliyor;
       await logGonder(guild, {
         embeds: [new EmbedBuilder()
@@ -952,8 +981,8 @@ function ekipBasvuruKur(client) {
       if (!interaction.guild) return;
 
       // ---- Panel butonları ----
-      if (interaction.isButton() && (id === 'eb_open_ekip' || id === 'eb_open_yetkili')) {
-        return await ticketAc(interaction, id === 'eb_open_ekip' ? 'ekip' : 'yetkili');
+      if (interaction.isButton() && (id === 'eb_open_legal' || id === 'eb_open_illegal' || id === 'eb_open_ekip' || id === 'eb_open_yetkili')) {
+        return await ticketAc(interaction, (id === 'eb_open_legal' || id === 'eb_open_ekip') ? 'legal' : 'illegal');
       }
 
       // Buradan sonrası ticket kanalı içindeki bileşenler
