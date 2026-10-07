@@ -25,6 +25,9 @@ const VOICE_CHANNEL_ID = "1542872487715405976"; // 7/24 Duracağı Ses Kanalı I
 const LOG_CHANNEL_ID = "1557480455228498055";   // Ticket Log Kanalı ID
 const GUVENLI_HESAP_GUN = 7; // Hesap bu günden eskiyse "Güvenli" yazar
 
+// Ticket paneli arka plan görseli
+const TICKET_GORSEL = "https://media.discordapp.net/attachments/1529424223037161533/1556448842910670949/image.png?backend=b2&ex=6ac77f31&is=6ac62db1&hm=3b3deb0cd51c0ce018b51c484f00418dafd4802e1aff446fc5049c7b9ae7bc31&=&format=webp&quality=lossless&width=1536&height=864";
+
 // Ticket Kategorileri
 const TICKET_CATEGORIES = {
   'ticket_anticheat': { name: 'ANTICHEAT | Güvenlik', categoryName: 'ANTICHEAT TICKETLARI' },
@@ -170,7 +173,7 @@ client.on('messageCreate', async (message) => {
       .setColor('#3a86ff')
       .setTitle('FEST GUN | Destek Sistemi')
       .setDescription('Destek talebi oluşturmak için aşağıdaki menüden **konu seçimi** yapın.')
-      .setImage('https://media.discordapp.net/attachments/1542872935809814688/1543803508547915786/ChatGPT_Image_31_Agu_2026_05_01_30.png?ex=6ac10b4e&is=6abfb9ce&hm=02fe519e74feb16ca8d9c8be9e763c647c3e9540e6e25d54e1ff315d8b4de867&=&format=webp&quality=lossless&width=1024&height=683')
+      .setImage(TICKET_GORSEL)
       .setFooter({ text: 'FEST GUN Ticket Sistemi' });
 
     const selectMenu = new StringSelectMenuBuilder()
