@@ -22,7 +22,7 @@ const client = new Client({
 // ======================
 const SUPPORT_ROLE_ID = "1542872257276149860"; // Yetkili Rol ID
 const VOICE_CHANNEL_ID = "1542872487715405976"; // 7/24 Duracağı Ses Kanalı ID
-const LOG_CHANNEL_ID = "1543727426276692050";   // Ticket Log Kanalı ID
+const LOG_CHANNEL_ID = "1557480455228498055";   // Ticket Log Kanalı ID
 const GUVENLI_HESAP_GUN = 7; // Hesap bu günden eskiyse "Güvenli" yazar
 
 // Ticket Kategorileri
