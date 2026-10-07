@@ -308,11 +308,15 @@ client.on('interactionCreate', async (interaction) => {
       { id: client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels] }
     ];
 
-    if (SUPPORT_ROLE_ID) {
+    // Yetkili rolü bu sunucuda gerçekten var mı kontrol et (yoksa "not a cached User or Role" hatası verir)
+    const destekRol = SUPPORT_ROLE_ID ? await guild.roles.fetch(SUPPORT_ROLE_ID).catch(() => null) : null;
+    if (destekRol) {
       permissionOverwrites.push({
-        id: SUPPORT_ROLE_ID,
+        id: destekRol.id,
         allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory]
       });
+    } else if (SUPPORT_ROLE_ID) {
+      console.error(`❌ SUPPORT_ROLE_ID (${SUPPORT_ROLE_ID}) bu sunucuda bulunamadı! Rol ID'sini kontrol et, yetkililer ticketı göremez.`);
     }
 
     const channel = await guild.channels.create({
@@ -336,7 +340,7 @@ client.on('interactionCreate', async (interaction) => {
         .setEmoji('🔒')
     );
 
-    await channel.send({ content: `${member} ${SUPPORT_ROLE_ID ? `<@&${SUPPORT_ROLE_ID}>` : ''}`, embeds: [embed], components: [row] });
+    await channel.send({ content: `${member} ${destekRol ? `<@&${destekRol.id}>` : ''}`, embeds: [embed], components: [row] });
     await interaction.editReply({ content: `Ticket kanalın oluşturuldu: ${channel}` });
 
     // Log Kanalına Açılış Bildirimi Gönderme
