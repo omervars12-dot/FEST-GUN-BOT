@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ChannelType, PermissionFlagsBits, AttachmentBuilder, MessageFlags } = require('discord.js');
+const { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, UserSelectMenuBuilder, ChannelType, PermissionFlagsBits, OverwriteType, AttachmentBuilder, MessageFlags } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 
@@ -260,7 +260,8 @@ client.on('messageCreate', async (message) => {
       .addFields(
         { name: '`!komutlar`', value: 'Botun komut listesini gösterir.', inline: false },
         { name: '`!reklam`', value: '@everyone atarak bot sipariş duyurusunu gönderir. (Yönetici Özel)', inline: false },
-        { name: '`!ticketpanel`', value: 'Destek panelini kurar. (Yönetici Özel)', inline: false }
+        { name: '`!ticketpanel`', value: 'Destek panelini kurar. (Yönetici Özel)', inline: false },
+        { name: '`!ekipbasvuru`', value: 'Ekip başvuru panelini kurar. (Yönetici Özel)', inline: false }
       )
       .setFooter({ text: 'FEST GUN' });
 
@@ -438,6 +439,724 @@ client.on('interactionCreate', async (interaction) => {
     else interaction.reply({ content: mesaj, flags: MessageFlags.Ephemeral }).catch(() => {});
   }
 });
+
+// ============================================================
+// EKİP BAŞVURU SİSTEMİ
+// ============================================================
+// ======================
+// AYARLAR
+// ======================
+const TEAM_ROLE_ID = "1542872257276149860";     // Fest Gun Team rol ID (etiketlenecek + ticketları görecek + yönetecek)
+const EKIP_LOG_CHANNEL_ID = "1557513082777895053";   // Ekip başvuru log kanalı
+const LOG_ROL_ETIKET = true;                    // Log kanalında açılış bildiriminde de rol etiketlensin mi?
+const PANEL_GORSEL = '';                        // İstersen panel altına büyük görsel linki koy (boş = yok)
+const START_NUMBER = 0;                         // İlk ticket #1 olur. (örn. 150 yaparsan ilk ticket #151)
+const RENK = '#3a86ff';
+const EKIP_YETKILI_ROLLER = [TEAM_ROLE_ID].filter(Boolean);
+
+const TYPES = {
+  ekip:    { label: 'Ekip Başvurusu',        prefix: 'ekip',    categoryName: 'EKİP BAŞVURULARI' },
+  yetkili: { label: 'Ekip Yetkili Başvurusu', prefix: 'yetkili', categoryName: 'EKİP YETKİLİ BAŞVURULARI' }
+};
+
+const STATUS = {
+  bekliyor:    { emoji: 'ℹ️', text: 'Yetkili bekleniyor.', color: '#3a86ff' },
+  beklemede:   { emoji: '🕒', text: 'Beklemede.',          color: '#f1c40f' },
+  inceleniyor: { emoji: '🔎', text: 'İnceleniyor.',        color: '#e67e22' },
+  cozuldu:     { emoji: '✅', text: 'Çözüldü.',            color: '#2ecc71' }
+};
+
+const STATUS_BUTTONS = {
+  eb_st_beklemede: 'beklemede',
+  eb_st_inceleniyor: 'inceleniyor',
+  eb_st_cozuldu: 'cozuldu'
+};
+
+// ======================
+// KALICI VERİ (bot kapanıp açılsa da ticket numarası ve kayıtlar kaybolmaz)
+// ======================
+const DATA_FILE = path.join(__dirname, 'ekip_data.json');
+let data = { counter: START_NUMBER, tickets: {}, responseTimes: [] };
+
+function loadData() {
+  try {
+    if (!fs.existsSync(DATA_FILE)) return;
+    const raw = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+    data = {
+      counter: Number.isFinite(Number(raw.counter)) ? Number(raw.counter) : START_NUMBER,
+      tickets: raw.tickets && typeof raw.tickets === 'object' ? raw.tickets : {},
+      responseTimes: Array.isArray(raw.responseTimes) ? raw.responseTimes : []
+    };
+  } catch (e) {
+    console.error('❌ ekip_data.json okunamadı, yedeği alınıyor:', e.message);
+    try { fs.copyFileSync(DATA_FILE, DATA_FILE + '.bozuk'); } catch {}
+  }
+}
+
+function saveData() {
+  try {
+    const tmp = DATA_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+    fs.renameSync(tmp, DATA_FILE);
+  } catch (e) {
+    console.error('❌ ekip_data.json kaydedilemedi:', e.message);
+  }
+}
+
+// ======================
+// YARDIMCILAR
+// ======================
+const trTarih = (ms) => new Date(ms).toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul' });
+
+function fmtSure(ms) {
+  const s = Math.max(1, Math.round(ms / 1000));
+  if (s < 60) return `${s} saniye`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m} dakika`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return m % 60 ? `${h} saat ${m % 60} dakika` : `${h} saat`;
+  const d = Math.floor(h / 24);
+  return h % 24 ? `${d} gün ${h % 24} saat` : `${d} gün`;
+}
+
+function yanitSuresiMetni() {
+  const arr = data.responseTimes;
+  if (!arr.length) return 'Henüz veri yok';
+  const min = Math.min(...arr), max = Math.max(...arr);
+  return fmtSure(min) === fmtSure(max) ? fmtSure(min) : `${fmtSure(min)} - ${fmtSure(max)}`;
+}
+
+function isStaff(member) {
+  if (!member || !member.roles || !member.permissions) return false;
+  if (member.permissions.has(PermissionFlagsBits.Administrator)) return true;
+  return EKIP_YETKILI_ROLLER.some(id => member.roles.cache.has(id));
+}
+
+function ilkYanitKaydet(t) {
+  if (t.firstResponseAt) return;
+  t.firstResponseAt = Date.now();
+  data.responseTimes.push(Math.max(0, t.firstResponseAt - t.createdAt));
+  if (data.responseTimes.length > 50) data.responseTimes.shift();
+  saveData();
+}
+
+const ephemeral = (content) => ({ content, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
+
+// ======================
+// MESAJ / EMBED OLUŞTURUCULAR
+// ======================
+function ticketPayload(t, owner) {
+  const type = TYPES[t.type] || TYPES.ekip;
+  const st = STATUS[t.status] || STATUS.bekliyor;
+  const ts = Math.floor(t.createdAt / 1000);
+
+  const embed = new EmbedBuilder()
+    .setColor(st.color)
+    .setTitle(`🛡️ Destek Talebi #${t.number}`)
+    .setDescription(
+      `> <@${t.ownerId}> tarafından ticket talebi <t:${ts}:F> tarihinde oluşturuldu. <@&${TEAM_ROLE_ID}> rolüne sahip yetkililer sizinle ilgilenecek.\n\n` +
+      `• Destek ID: **#${t.number}**\n` +
+      `• Destek Kategorisi: **${type.label}**\n\n` +
+      `• Ortalama Yanıt Süresi: **${yanitSuresiMetni()}**\n` +
+      `• Destek Durumu: ${st.emoji} **${st.text}**` + (t.claimedBy ? ` (Üstlenen: <@${t.claimedBy}>)` : '')
+    )
+    .setFooter({ text: 'FEST GUN' });
+  if (owner) embed.setThumbnail(owner.displayAvatarURL({ extension: 'png', size: 256 }));
+
+  const aktif = (key) => (t.status === key ? ButtonStyle.Primary : ButtonStyle.Secondary);
+
+  const row1 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('eb_claim').setLabel(t.claimedBy ? 'Claim Bırak' : 'Ticket Claim').setEmoji('🙋').setStyle(t.claimedBy ? ButtonStyle.Primary : ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('eb_st_beklemede').setLabel('Beklemede').setEmoji('🕒').setStyle(aktif('beklemede')),
+    new ButtonBuilder().setCustomId('eb_st_inceleniyor').setLabel('İnceleniyor').setEmoji('🔎').setStyle(aktif('inceleniyor')),
+    new ButtonBuilder().setCustomId('eb_st_cozuldu').setLabel('Çözüldü').setEmoji('✅').setStyle(aktif('cozuldu')),
+    new ButtonBuilder().setCustomId('eb_refresh').setEmoji('🔄').setStyle(ButtonStyle.Secondary)
+  );
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('eb_close').setLabel('Talebi Kapat').setEmoji('🗑️').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId('eb_notify').setLabel('Bildirim Al').setEmoji('🔔').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('eb_members').setLabel('Üyeleri Yönet').setEmoji('👥').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('eb_transcript').setLabel('Transcript').setEmoji('📄').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('eb_video').setLabel('Video Kanıt Yükle').setEmoji('🎥').setStyle(ButtonStyle.Secondary)
+  );
+
+  return { embeds: [embed], components: [row1, row2] };
+}
+
+function panelPayload(guild) {
+  const embed = new EmbedBuilder()
+    .setColor(RENK)
+    .setTitle('🛡️ Festgun Ekip Başvurusu')
+    .setDescription('Festgun bünyesinde ekip kurmak veya mevcut ekibinizle sunucumuza katılmak için aşağıdaki kuralları ve bilgilendirmeleri inceleyiniz.')
+    .addFields(
+      {
+        name: '📋 Ekip Başvuru Bilgileri',
+        value: [
+          '• Ekip başvurularında doğru ve eksiksiz bilgi verilmesi zorunludur.',
+          '• Ekip açmak isteyen ekip liderlerine öncelik tanınacaktır.',
+          '• Ekip liderlerinin başvuruları değerlendirilirken aktiflik, ekip sayısı ve geçmiş tecrübe dikkate alınacaktır.',
+          '• Yeterli ve düzenli bir ekip kadrosuna sahip olan ekip liderleri mülakat sürecine tabi tutulmadan değerlendirmeye alınabilir.',
+          '• Festgun yönetimi gerekli gördüğü durumlarda ekip liderleriyle ayrıca görüşme yapabilir.',
+          '• Birden fazla ekip başvurusu yapılması yasaktır.'
+        ].join('\n')
+      },
+      {
+        name: '⭐ Ekip Liderlerine Özel',
+        value: [
+          "• Ekip kurarak Festgun'a katılan ekipler için özel destek ve ayrıcalıklar sağlanacaktır.",
+          '• Aktif ve düzenli ekipler, sunucu içerisindeki etkinliklerde ve organizasyonlarda öncelikli olarak değerlendirilecektir.',
+          '• Ekip büyüklüğüne ve aktifliğine göre çeşitli ekip ödülleri ve destekleri sunulabilir.'
+        ].join('\n')
+      },
+      {
+        name: '⚠️ Önemli',
+        value: [
+          '• Ekip kuralları ve sunucu kurallarına uymak zorunludur.',
+          '• Başvuru gönderen herkes, ekip kurallarını kabul etmiş sayılır.',
+          '• Yönetim, başvuruları değerlendirme ve gerekli gördüğü durumlarda başvuruyu reddetme hakkına sahiptir.'
+        ].join('\n')
+      },
+      { name: '\u200b', value: "**Festgun'da ekibini kur, ekibinle birlikte yerini al!** 🚀" }
+    )
+    .setFooter({ text: 'FEST GUN' });
+
+  if (guild && guild.iconURL()) embed.setThumbnail(guild.iconURL());
+  if (PANEL_GORSEL) embed.setImage(PANEL_GORSEL);
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('eb_open_ekip').setLabel('Ekip Başvurusu').setEmoji('🛡️').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('eb_open_yetkili').setLabel('Ekip Yetkili Başvurusu').setEmoji('🛡️').setStyle(ButtonStyle.Danger)
+  );
+  return { embeds: [embed], components: [row] };
+}
+
+// ======================
+// TRANSCRIPT
+// ======================
+async function tumMesajlar(channel, max = 1000) {
+  const all = [];
+  let before;
+  while (all.length < max) {
+    const batch = await channel.messages.fetch({ limit: 100, ...(before ? { before } : {}) });
+    if (!batch.size) break;
+    all.push(...batch.values());
+    before = batch.last().id;
+    if (batch.size < 100) break;
+  }
+  return all.reverse(); // eskiden yeniye
+}
+
+async function transcriptOlustur(channel, t) {
+  const msgs = await tumMesajlar(channel);
+  const type = TYPES[t.type] || TYPES.ekip;
+  let txt = `--- ${channel.name} | Destek Talebi #${t.number} GEÇMİŞİ ---\n`;
+  txt += `Kategori: ${type.label}\nAçan (ID): ${t.ownerId}\nAçılış: ${trTarih(t.createdAt)}\n`;
+  txt += `Üstlenen (ID): ${t.claimedBy || '-'}\nMesaj sayısı: ${msgs.length}\n\n`;
+  for (const m of msgs) {
+    let satir = `[${trTarih(m.createdTimestamp)}] ${m.author.tag} (${m.author.id}): ${m.content || ''}`;
+    if (m.attachments.size) satir += ' ' + m.attachments.map(a => `📎 ${a.url}`).join(' ');
+    if (m.embeds.length && !m.content) satir += ` [Embed${m.embeds[0].title ? ': ' + m.embeds[0].title : ''}]`;
+    txt += satir + '\n';
+  }
+  return new AttachmentBuilder(Buffer.from(txt, 'utf-8'), { name: `${channel.name}-gecmis.txt` });
+}
+
+// ======================
+// ANA KURULUM
+// ======================
+function ekipBasvuruKur(client) {
+  loadData();
+
+  const creating = new Set(); // aynı kişi çift tıklarsa iki kanal açılmasın
+  const closing = new Set();  // çift kapatma engeli
+
+  async function logGonder(guild, payload) {
+    try {
+      const ch = guild.channels.cache.get(EKIP_LOG_CHANNEL_ID) || await guild.channels.fetch(EKIP_LOG_CHANNEL_ID).catch(() => null);
+      if (!ch || !ch.isTextBased()) return console.warn(`⚠️ Ekip log kanalı bulunamadı (${EKIP_LOG_CHANNEL_ID}).`);
+      await ch.send(payload);
+    } catch (e) {
+      console.error('Ekip log gönderilemedi:', e.message);
+    }
+  }
+
+  async function bildirimGonder(t, actorId, text) {
+    for (const uid of t.notify || []) {
+      if (uid === actorId) continue;
+      try {
+        const u = await client.users.fetch(uid);
+        await u.send({
+          embeds: [new EmbedBuilder()
+            .setColor(RENK)
+            .setTitle(`🔔 Destek Talebi #${t.number}`)
+            .setDescription(`${text}\n\n[Talebe git](https://discord.com/channels/${t.guildId}/${t.channelId})`)
+            .setFooter({ text: 'FEST GUN' })]
+        });
+      } catch {}
+    }
+  }
+
+  async function ticketGuncelle(interaction, t) {
+    const owner = await client.users.fetch(t.ownerId).catch(() => null);
+    await interaction.editReply(ticketPayload(t, owner));
+  }
+
+  // ---------- Açılışta: silinmiş kanalların kayıtlarını temizle ----------
+  client.once('ready', async () => {
+    try {
+      let degisti = false;
+      for (const [cid, t] of Object.entries(data.tickets)) {
+        const g = client.guilds.cache.get(t.guildId);
+        if (!g) continue;
+        const ch = await g.channels.fetch(cid).catch(() => null);
+        if (!ch) { delete data.tickets[cid]; degisti = true; }
+      }
+      if (degisti) saveData();
+      console.log('🛡️ Ekip başvuru sistemi hazır.');
+    } catch (e) {
+      console.error('Ekip kayıt temizliği hatası:', e.message);
+    }
+  });
+
+  client.on('channelDelete', (ch) => {
+    if (data.tickets[ch.id]) { delete data.tickets[ch.id]; saveData(); }
+  });
+
+  // ---------- Komut + ilk yetkili yanıtı ölçümü ----------
+  client.on('messageCreate', async (message) => {
+    try {
+      if (message.author.bot || !message.guild) return;
+
+      if (message.content.trim() === '!ekipbasvuru') {
+        if (!message.member || !message.member.permissions.has(PermissionFlagsBits.Administrator)) {
+          return message.reply({ content: 'Bu komutu kullanmak için Yönetici yetkin olmalı!' }).catch(() => {});
+        }
+        await message.channel.send(panelPayload(message.guild));
+        await message.delete().catch(() => {});
+        return;
+      }
+
+      const t = data.tickets[message.channelId];
+      if (t && !t.firstResponseAt && message.author.id !== t.ownerId && isStaff(message.member)) {
+        ilkYanitKaydet(t);
+      }
+    } catch (e) {
+      console.error('Ekip messageCreate hatası:', e);
+    }
+  });
+
+  // ---------- Ticket açma ----------
+  async function ticketAc(interaction, typeKey) {
+    const guild = interaction.guild;
+    const member = interaction.member;
+    const type = TYPES[typeKey];
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+    if (creating.has(member.id)) {
+      return interaction.editReply({ content: '⏳ Talebin zaten oluşturuluyor, lütfen bekle.' });
+    }
+    creating.add(member.id);
+
+    let number = null;
+    let channel = null;
+    try {
+      // Kişi başı tek aktif başvuru (iki tür birlikte sayılır)
+      const mevcut = Object.entries(data.tickets).find(([, t]) => t.ownerId === member.id && t.guildId === guild.id);
+      if (mevcut) {
+        const [cid] = mevcut;
+        const ch = guild.channels.cache.get(cid) || await guild.channels.fetch(cid).catch(() => null);
+        if (ch) {
+          return interaction.editReply({ content: `❌ Zaten açık bir başvuru talebin var: ${ch}\nYeni başvuru açmak için mevcut talebin kapatılmasını bekle.` });
+        }
+        delete data.tickets[cid];
+        saveData();
+      }
+
+      number = ++data.counter;
+      saveData();
+
+      let kategori = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name === type.categoryName);
+      if (!kategori) {
+        kategori = await guild.channels.create({ name: type.categoryName, type: ChannelType.GuildCategory });
+      }
+
+      const izinler = [
+        { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+        {
+          id: member.id,
+          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.EmbedLinks]
+        },
+        {
+          id: client.user.id,
+          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ManageChannels]
+        }
+      ];
+      for (const rid of EKIP_YETKILI_ROLLER) {
+        const rol = await guild.roles.fetch(rid).catch(() => null);
+        if (rol) {
+          izinler.push({
+            id: rol.id,
+            allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.EmbedLinks]
+          });
+        } else {
+          console.error(`❌ Rol (${rid}) bu sunucuda bulunamadı! TEAM_ROLE_ID'yi kontrol et.`);
+        }
+      }
+
+      const guvenliIsim = member.user.username.toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 60) || member.id.slice(-6);
+      const kanalAdi = `${type.prefix}・${guvenliIsim}`;
+
+      const kanalAyar = {
+        name: kanalAdi,
+        type: ChannelType.GuildText,
+        topic: `Destek Talebi #${number} | ${type.label} | Açan: ${member.user.tag} (${member.id})`,
+        permissionOverwrites: izinler
+      };
+      try {
+        channel = await guild.channels.create({ ...kanalAyar, parent: kategori.id });
+      } catch (e) {
+        // Kategori doluysa (50 kanal) kategorisiz aç
+        if (/maximum number of channels in category/i.test(e.message || '')) {
+          channel = await guild.channels.create(kanalAyar);
+        } else {
+          throw e;
+        }
+      }
+
+      const t = {
+        number,
+        guildId: guild.id,
+        channelId: channel.id,
+        ownerId: member.id,
+        type: typeKey,
+        status: 'bekliyor',
+        claimedBy: null,
+        createdAt: Date.now(),
+        firstResponseAt: null,
+        notify: []
+      };
+      data.tickets[channel.id] = t;
+      saveData();
+
+      try {
+        await channel.send({
+          content: `${member} <@&${TEAM_ROLE_ID}>`,
+          ...ticketPayload(t, member.user),
+          allowedMentions: { users: [member.id], roles: [TEAM_ROLE_ID] }
+        });
+      } catch (e) {
+        // Mesaj gönderilemediyse yarım kalan ticketı temizle
+        delete data.tickets[channel.id];
+        saveData();
+        await channel.delete().catch(() => {});
+        channel = null;
+        throw e;
+      }
+
+      await interaction.editReply({
+        embeds: [new EmbedBuilder()
+          .setColor('#2ecc71')
+          .setTitle('🟩 Talep Oluşturuldu!')
+          .setDescription(`Ticket talebiniz **#${number}** bilet numarasıyla **${type.label}** kategorisinde oluşturuldu.\n\n• Destek Talebiniz: ${channel}`)],
+        components: [new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setLabel('Talebe git').setStyle(ButtonStyle.Link).setURL(channel.url)
+        )]
+      });
+
+      await logGonder(guild, {
+        content: LOG_ROL_ETIKET ? `<@&${TEAM_ROLE_ID}>` : undefined,
+        allowedMentions: { roles: LOG_ROL_ETIKET ? [TEAM_ROLE_ID] : [] },
+        embeds: [new EmbedBuilder()
+          .setColor('#ffaa00')
+          .setTitle('📂 Yeni Ekip Başvurusu')
+          .addFields(
+            { name: 'Başvuran', value: `${member.user.tag} (<@${member.id}>)`, inline: true },
+            { name: 'Kategori', value: type.label, inline: true },
+            { name: 'Talep No', value: `#${number}`, inline: true },
+            { name: 'Kanal', value: `${channel}`, inline: false }
+          )
+          .setTimestamp()]
+      });
+    } catch (e) {
+      // Numarayı geri al (kanal açılamadıysa)
+      if (number !== null && !channel && data.counter === number) { data.counter--; saveData(); }
+      throw e;
+    } finally {
+      creating.delete(member.id);
+    }
+  }
+
+  // ---------- Ticket kapatma ----------
+  async function ticketKapat(interaction, t) {
+    const channel = interaction.channel;
+    const guild = interaction.guild;
+    if (closing.has(channel.id)) {
+      return interaction.update({ content: '⏳ Bu ticket zaten kapatılıyor.', components: [] });
+    }
+    closing.add(channel.id);
+
+    try {
+      await interaction.update({ content: '🔒 Ticket kapatılıyor...', components: [] });
+
+      await channel.send({
+        content: `🔒 Bu ticket ${interaction.user} (**${interaction.user.tag}**) tarafından kapatıldı. Kanal 5 saniye içinde silinecek...`,
+        allowedMentions: { parse: [] }
+      }).catch(() => {});
+
+      let dosya = null;
+      try { dosya = await transcriptOlustur(channel, t); }
+      catch (e) { console.error('Transcript alınamadı:', e); }
+
+      const type = TYPES[t.type] || TYPES.ekip;
+      const st = STATUS[t.status] || STATUS.bekliyor;
+      await logGonder(guild, {
+        embeds: [new EmbedBuilder()
+          .setColor('#ff3333')
+          .setTitle('🔒 Ekip Başvurusu Kapatıldı')
+          .addFields(
+            { name: 'Talep No', value: `#${t.number}`, inline: true },
+            { name: 'Kategori', value: type.label, inline: true },
+            { name: 'Durum', value: `${st.emoji} ${st.text}`, inline: true },
+            { name: 'Başvuran', value: `<@${t.ownerId}> (${t.ownerId})`, inline: true },
+            { name: 'Kapatan Yetkili', value: `${interaction.user.tag} (<@${interaction.user.id}>)`, inline: true },
+            { name: 'Üstlenen', value: t.claimedBy ? `<@${t.claimedBy}>` : 'Yok', inline: true },
+            { name: 'Açık Kalma Süresi', value: fmtSure(Date.now() - t.createdAt), inline: true },
+            { name: 'Kanal Adı', value: channel.name, inline: true }
+          )
+          .setTimestamp()],
+        files: dosya ? [dosya] : [],
+        allowedMentions: { parse: [] }
+      });
+
+      await bildirimGonder(t, interaction.user.id, `Bu talep **${interaction.user.tag}** tarafından kapatıldı.`);
+
+      delete data.tickets[channel.id];
+      saveData();
+
+      setTimeout(() => {
+        channel.delete().catch(() => {});
+        closing.delete(channel.id);
+      }, 5000);
+    } catch (e) {
+      closing.delete(channel.id);
+      throw e;
+    }
+  }
+
+  // ---------- Etkileşimler ----------
+  client.on('interactionCreate', async (interaction) => {
+    const id = interaction.customId;
+    if (!id || !id.startsWith('eb_')) return;
+
+    try {
+      if (!interaction.guild) return;
+
+      // ---- Panel butonları ----
+      if (interaction.isButton() && (id === 'eb_open_ekip' || id === 'eb_open_yetkili')) {
+        return await ticketAc(interaction, id === 'eb_open_ekip' ? 'ekip' : 'yetkili');
+      }
+
+      // Buradan sonrası ticket kanalı içindeki bileşenler
+      const t = data.tickets[interaction.channelId];
+      if (!t) {
+        return interaction.reply(ephemeral('❌ Bu ticketın kaydı bulunamadı (zaten kapatılmış olabilir).'));
+      }
+      const staff = isStaff(interaction.member);
+      const sahip = interaction.user.id === t.ownerId;
+
+      // ---- Claim ----
+      if (interaction.isButton() && id === 'eb_claim') {
+        if (!staff) return interaction.reply(ephemeral('❌ Bu butonu sadece yetkililer kullanabilir!'));
+        const admin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
+        if (t.claimedBy && t.claimedBy !== interaction.user.id && !admin) {
+          return interaction.reply(ephemeral(`❌ Bu ticket zaten <@${t.claimedBy}> tarafından üstlenilmiş.`));
+        }
+        await interaction.deferUpdate();
+        if (t.claimedBy) {
+          t.claimedBy = null;
+          if (t.status === 'inceleniyor') t.status = 'bekliyor';
+          await bildirimGonder(t, interaction.user.id, `**${interaction.user.tag}** talebi bıraktı.`);
+        } else {
+          t.claimedBy = interaction.user.id;
+          if (t.status === 'bekliyor') t.status = 'inceleniyor';
+          ilkYanitKaydet(t);
+          await bildirimGonder(t, interaction.user.id, `Talep **${interaction.user.tag}** tarafından üstlenildi.`);
+        }
+        saveData();
+        return await ticketGuncelle(interaction, t);
+      }
+
+      // ---- Durum butonları ----
+      if (interaction.isButton() && STATUS_BUTTONS[id]) {
+        if (!staff) return interaction.reply(ephemeral('❌ Bu butonu sadece yetkililer kullanabilir!'));
+        await interaction.deferUpdate();
+        t.status = STATUS_BUTTONS[id];
+        ilkYanitKaydet(t);
+        saveData();
+        await ticketGuncelle(interaction, t);
+        await bildirimGonder(t, interaction.user.id, `Talep durumu **${STATUS[t.status].text}** olarak güncellendi (${interaction.user.tag}).`);
+        return;
+      }
+
+      // ---- Yenile ----
+      if (interaction.isButton() && id === 'eb_refresh') {
+        await interaction.deferUpdate();
+        return await ticketGuncelle(interaction, t);
+      }
+
+      // ---- Bildirim Al (aç/kapat) ----
+      if (interaction.isButton() && id === 'eb_notify') {
+        t.notify = Array.isArray(t.notify) ? t.notify : [];
+        const i = t.notify.indexOf(interaction.user.id);
+        if (i === -1) {
+          t.notify.push(interaction.user.id);
+          saveData();
+          return interaction.reply(ephemeral('🔔 Bu talepteki gelişmeler (durum, üstlenme, kapanma) artık **DM** olarak sana gelecek. DM\'lerin açık olduğundan emin ol.'));
+        }
+        t.notify.splice(i, 1);
+        saveData();
+        return interaction.reply(ephemeral('🔕 Bu talep için bildirimler kapatıldı.'));
+      }
+
+      // ---- Video Kanıt ----
+      if (interaction.isButton() && id === 'eb_video') {
+        return interaction.reply(ephemeral(
+          '🎥 **Video kanıt yükleme**\n' +
+          '• Videoyu doğrudan bu kanala dosya olarak yükleyebilirsin.\n' +
+          '• Dosya büyükse **YouTube / Medal / Streamable** gibi bir linki bu kanala yazman yeterli.\n' +
+          '• Link açıkken (herkese açık / bağlantıya sahip olanlar) paylaş, yetkililer erişebilsin.'
+        ));
+      }
+
+      // ---- Transcript ----
+      if (interaction.isButton() && id === 'eb_transcript') {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        const dosya = await transcriptOlustur(interaction.channel, t);
+        return await interaction.editReply({ content: '📄 Ticket mesaj geçmişi hazır:', files: [dosya] });
+      }
+
+      // ---- Üyeleri Yönet ----
+      if (interaction.isButton() && id === 'eb_members') {
+        if (!staff && !sahip) return interaction.reply(ephemeral('❌ Bu butonu sadece yetkililer ve ticket sahibi kullanabilir!'));
+
+        const satirlar = [
+          new ActionRowBuilder().addComponents(
+            new UserSelectMenuBuilder()
+              .setCustomId('eb_add_select')
+              .setPlaceholder('Ticketa eklenecek üyeleri seç...')
+              .setMinValues(1)
+              .setMaxValues(10)
+          )
+        ];
+
+        const ekli = interaction.channel.permissionOverwrites.cache
+          .filter(o => o.type === OverwriteType.Member && o.id !== t.ownerId && o.id !== client.user.id)
+          .map(o => o.id)
+          .slice(0, 25);
+
+        if (ekli.length) {
+          const secenekler = [];
+          for (const uid of ekli) {
+            const m = await interaction.guild.members.fetch(uid).catch(() => null);
+            secenekler.push({ label: (m ? m.displayName : uid).slice(0, 100), value: uid, description: m ? `@${m.user.username}`.slice(0, 100) : undefined });
+          }
+          satirlar.push(new ActionRowBuilder().addComponents(
+            new StringSelectMenuBuilder()
+              .setCustomId('eb_remove_select')
+              .setPlaceholder('Ticketdan çıkarılacak üyeleri seç...')
+              .setMinValues(1)
+              .setMaxValues(secenekler.length)
+              .addOptions(secenekler)
+          ));
+        }
+
+        return interaction.reply({
+          content: '👥 **Üye Yönetimi**\nEklemek için üstteki menüyü, çıkarmak için alttaki menüyü kullan.',
+          components: satirlar,
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      // ---- Üye ekle ----
+      if (interaction.isUserSelectMenu() && id === 'eb_add_select') {
+        if (!staff && !sahip) return interaction.reply(ephemeral('❌ Yetkin yok!'));
+        const eklenen = [], basarisiz = [];
+        for (const uid of interaction.values) {
+          if (uid === t.ownerId || uid === client.user.id) continue;
+          try {
+            await interaction.channel.permissionOverwrites.edit(uid, {
+              ViewChannel: true, SendMessages: true, ReadMessageHistory: true, AttachFiles: true, EmbedLinks: true
+            });
+            eklenen.push(uid);
+          } catch { basarisiz.push(uid); }
+        }
+        let cevap = eklenen.length ? `✅ Eklendi: ${eklenen.map(u => `<@${u}>`).join(', ')}` : 'ℹ️ Eklenecek yeni üye yok.';
+        if (basarisiz.length) cevap += `\n❌ Eklenemedi: ${basarisiz.map(u => `<@${u}>`).join(', ')} (Botun **Rolleri Yönet** yetkisi olduğundan emin ol.)`;
+        await interaction.update({ content: cevap, components: [], allowedMentions: { parse: [] } });
+        if (eklenen.length) {
+          await interaction.channel.send({
+            content: `➕ ${eklenen.map(u => `<@${u}>`).join(', ')} ticketa **${interaction.user.tag}** tarafından eklendi.`,
+            allowedMentions: { users: eklenen }
+          }).catch(() => {});
+        }
+        return;
+      }
+
+      // ---- Üye çıkar ----
+      if (interaction.isStringSelectMenu() && id === 'eb_remove_select') {
+        if (!staff && !sahip) return interaction.reply(ephemeral('❌ Yetkin yok!'));
+        const cikan = [], basarisiz = [];
+        for (const uid of interaction.values) {
+          if (uid === t.ownerId) continue;
+          try { await interaction.channel.permissionOverwrites.delete(uid); cikan.push(uid); }
+          catch { basarisiz.push(uid); }
+        }
+        let cevap = cikan.length ? `✅ Çıkarıldı: ${cikan.map(u => `<@${u}>`).join(', ')}` : 'ℹ️ Çıkarılacak üye yok.';
+        if (basarisiz.length) cevap += `\n❌ Çıkarılamadı: ${basarisiz.map(u => `<@${u}>`).join(', ')}`;
+        await interaction.update({ content: cevap, components: [], allowedMentions: { parse: [] } });
+        if (cikan.length) {
+          await interaction.channel.send({
+            content: `➖ ${cikan.map(u => `<@${u}>`).join(', ')} ticketdan **${interaction.user.tag}** tarafından çıkarıldı.`,
+            allowedMentions: { parse: [] }
+          }).catch(() => {});
+        }
+        return;
+      }
+
+      // ---- Talebi kapat (onay iste) ----
+      if (interaction.isButton() && id === 'eb_close') {
+        if (!staff) return interaction.reply(ephemeral('❌ Bu ticketı sadece yetkililer kapatabilir!'));
+        return interaction.reply({
+          content: '🗑️ Bu talebi kapatmak istediğine emin misin? Kanal silinecek ve mesaj geçmişi log kanalına gönderilecek.',
+          components: [new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('eb_close_confirm').setLabel('Evet, kapat').setStyle(ButtonStyle.Danger),
+            new ButtonBuilder().setCustomId('eb_close_cancel').setLabel('Vazgeç').setStyle(ButtonStyle.Secondary)
+          )],
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      if (interaction.isButton() && id === 'eb_close_cancel') {
+        return interaction.update({ content: '✅ Kapatma işlemi iptal edildi.', components: [] });
+      }
+
+      if (interaction.isButton() && id === 'eb_close_confirm') {
+        if (!staff) return interaction.reply(ephemeral('❌ Bu ticketı sadece yetkililer kapatabilir!'));
+        return await ticketKapat(interaction, t);
+      }
+    } catch (e) {
+      console.error('Ekip başvuru hatası:', e);
+      const mesaj = `❌ Bir hata oluştu: ${e.message || 'Bilinmeyen hata'}\n(Botun Kanalları Yönet ve Rolleri Yönet yetkisi var mı kontrol et.)`;
+      try {
+        // editReply KULLANMA: deferUpdate sonrası ana ticket mesajını bozar. followUp her durumda güvenli.
+        if (interaction.replied || interaction.deferred) await interaction.followUp({ content: mesaj, flags: MessageFlags.Ephemeral });
+        else await interaction.reply({ content: mesaj, flags: MessageFlags.Ephemeral });
+      } catch {}
+    }
+  });
+}
+
+ekipBasvuruKur(client);
 
 // Botu başlat
 client.login(process.env.DISCORD_TOKEN);
