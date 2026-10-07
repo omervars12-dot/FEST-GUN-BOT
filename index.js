@@ -446,13 +446,14 @@ client.on('interactionCreate', async (interaction) => {
 // ======================
 // AYARLAR
 // ======================
-const TEAM_ROLE_ID = "1542872257276149860";     // Fest Gun Team rol ID (etiketlenecek + ticketları görecek + yönetecek)
+const TEAM_ROLE_ID = "1557449922347929771";     // Fest Gun Team rol ID (ticket açılınca ETİKETLENİR)
 const EKIP_LOG_CHANNEL_ID = "1557513082777895053";   // Ekip başvuru log kanalı
 const LOG_ROL_ETIKET = true;                    // Log kanalında açılış bildiriminde de rol etiketlensin mi?
 const PANEL_GORSEL = '';                        // İstersen panel altına büyük görsel linki koy (boş = yok)
 const START_NUMBER = 0;                         // İlk ticket #1 olur. (örn. 150 yaparsan ilk ticket #151)
 const RENK = '#3a86ff';
-const EKIP_YETKILI_ROLLER = [TEAM_ROLE_ID].filter(Boolean);
+// Ticketı görebilen / yönetebilen / kapatabilen roller (etiketlenen sadece TEAM_ROLE_ID)
+const EKIP_YETKILI_ROLLER = [...new Set([TEAM_ROLE_ID, SUPPORT_ROLE_ID].filter(Boolean))];
 
 const TYPES = {
   legal:   { label: 'Legal Ekip',   prefix: 'legal',   categoryName: 'LEGAL EKİP BAŞVURULARI' },
@@ -1154,6 +1155,7 @@ function ekipBasvuruKur(client) {
 
       // ---- Talebi kapat (onay iste) ----
       if (interaction.isButton() && id === 'eb_close') {
+        if (sahip) return interaction.reply(ephemeral('❌ Kendi açtığın ticketı kapatamazsın! Talebin bir yetkili tarafından kapatılacak.'));
         if (!staff) return interaction.reply(ephemeral('❌ Bu ticketı sadece yetkililer kapatabilir!'));
         return interaction.reply({
           content: '🗑️ Bu talebi kapatmak istediğine emin misin? Kanal silinecek ve mesaj geçmişi log kanalına gönderilecek.',
@@ -1170,6 +1172,7 @@ function ekipBasvuruKur(client) {
       }
 
       if (interaction.isButton() && id === 'eb_close_confirm') {
+        if (sahip) return interaction.reply(ephemeral('❌ Kendi açtığın ticketı kapatamazsın!'));
         if (!staff) return interaction.reply(ephemeral('❌ Bu ticketı sadece yetkililer kapatabilir!'));
         return await ticketKapat(interaction, t);
       }
