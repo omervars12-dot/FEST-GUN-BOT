@@ -1,5 +1,7 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ChannelType, PermissionFlagsBits, AttachmentBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, Partials, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ChannelType, PermissionFlagsBits, AttachmentBuilder, MessageFlags } = require('discord.js');
+const fs = require('fs');
+const path = require('path');
 
 // Karşılama kartı için (npm i @napi-rs/canvas). Yüklü değilse kart olmadan devam eder.
 let createCanvas, loadImage;
@@ -27,6 +29,27 @@ const GUVENLI_HESAP_GUN = 7; // Hesap bu günden eskiyse "Güvenli" yazar
 
 // Ticket paneli arka plan görseli
 const TICKET_GORSEL = "https://media.discordapp.net/attachments/1529424223037161533/1556448842910670949/image.png?backend=b2&ex=6ac77f31&is=6ac62db1&hm=3b3deb0cd51c0ce018b51c484f00418dafd4802e1aff446fc5049c7b9ae7bc31&=&format=webp&quality=lossless&width=1536&height=864";
+
+// Panel görseli: önce klasördeki ticket.png / ticket.jpg / ticket.webp kullanılır (link süresi dolmaz).
+// Dosya yoksa link sunucudan indirilip mesaja dosya olarak eklenir, o da olmazsa direkt link denenir.
+async function ticketGorselDosyasi() {
+  for (const ad of ['ticket.png', 'ticket.jpg', 'ticket.jpeg', 'ticket.webp']) {
+    const yol = path.join(__dirname, ad);
+    try { if (fs.existsSync(yol)) return new AttachmentBuilder(yol, { name: ad }); } catch {}
+  }
+  try {
+    const r = await fetch(TICKET_GORSEL);
+    if (r.ok) {
+      const tip = r.headers.get('content-type') || '';
+      const ad = tip.includes('webp') ? 'ticket.webp' : tip.includes('jpeg') ? 'ticket.jpg' : 'ticket.png';
+      return new AttachmentBuilder(Buffer.from(await r.arrayBuffer()), { name: ad });
+    }
+    console.warn(`⚠️ Panel görseli indirilemedi (HTTP ${r.status}). Linkin süresi dolmuş olabilir, görseli ticket.png olarak bota ekle.`);
+  } catch (e) {
+    console.warn('⚠️ Panel görseli indirilemedi:', e.message);
+  }
+  return null;
+}
 
 // Ticket Kategorileri
 const TICKET_CATEGORIES = {
@@ -173,8 +196,10 @@ client.on('messageCreate', async (message) => {
       .setColor('#3a86ff')
       .setTitle('FEST GUN | Destek Sistemi')
       .setDescription('Destek talebi oluşturmak için aşağıdaki menüden **konu seçimi** yapın.')
-      .setImage(TICKET_GORSEL)
       .setFooter({ text: 'FEST GUN Ticket Sistemi' });
+
+    const gorsel = await ticketGorselDosyasi();
+    embed.setImage(gorsel ? `attachment://${gorsel.name}` : TICKET_GORSEL);
 
     const selectMenu = new StringSelectMenuBuilder()
       .setCustomId('ticket_select_menu')
@@ -214,7 +239,7 @@ client.on('messageCreate', async (message) => {
 
     const row = new ActionRowBuilder().addComponents(selectMenu);
 
-    await message.channel.send({ embeds: [embed], components: [row] });
+    await message.channel.send({ embeds: [embed], components: [row], files: gorsel ? [gorsel] : [] });
     await message.delete().catch(() => {});
   }
 
@@ -250,6 +275,7 @@ client.on('messageCreate', async (message) => {
 // ETKİLEŞİM İŞLEMCİSİ (Menüler ve Butonlar)
 // ======================
 client.on('interactionCreate', async (interaction) => {
+  try {
   // Seçim Menüsü (Ticket Oluşturma)
   if (interaction.isStringSelectMenu() && interaction.customId === 'ticket_select_menu') {
     const guild = interaction.guild;
@@ -259,10 +285,13 @@ client.on('interactionCreate', async (interaction) => {
 
     if (!categoryInfo) return;
 
+    // Discord 3 saniyede yanıt bekler, kanal açmadan önce hemen yanıt ver
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
     const channelName = `${categoryInfo.name.split(' ')[0].toLowerCase()}-${member.user.username.toLowerCase()}`;
     const existing = guild.channels.cache.find(c => c.name === channelName);
     if (existing) {
-      return interaction.reply({ content: `Zaten bu kategoride açık bir ticketin var: ${existing}`, ephemeral: true });
+      return interaction.editReply({ content: `Zaten bu kategoride açık bir ticketin var: ${existing}` });
     }
 
     let discordCategory = guild.channels.cache.find(c => c.name === categoryInfo.categoryName && c.type === ChannelType.GuildCategory);
@@ -308,7 +337,7 @@ client.on('interactionCreate', async (interaction) => {
     );
 
     await channel.send({ content: `${member} ${SUPPORT_ROLE_ID ? `<@&${SUPPORT_ROLE_ID}>` : ''}`, embeds: [embed], components: [row] });
-    await interaction.reply({ content: `Ticket kanalın oluşturuldu: ${channel}`, ephemeral: true });
+    await interaction.editReply({ content: `Ticket kanalın oluşturuldu: ${channel}` });
 
     // Log Kanalına Açılış Bildirimi Gönderme
     if (LOG_CHANNEL_ID) {
@@ -375,6 +404,12 @@ client.on('interactionCreate', async (interaction) => {
     setTimeout(() => {
       interaction.channel.delete().catch(() => {});
     }, 3000);
+  }
+  } catch (e) {
+    console.error('Etkileşim hatası:', e);
+    const mesaj = `❌ Bir hata oluştu: ${e.message || 'Bilinmeyen hata'}\n(Botun Kanalları Yönet yetkisi var mı kontrol et.)`;
+    if (interaction.deferred || interaction.replied) interaction.editReply({ content: mesaj }).catch(() => {});
+    else interaction.reply({ content: mesaj, flags: MessageFlags.Ephemeral }).catch(() => {});
   }
 });
 
